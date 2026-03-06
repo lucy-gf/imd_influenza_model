@@ -10,9 +10,9 @@ options(dplyr.summarise.inform = FALSE)
 .args <- if (interactive()) c(
   file.path("data", "inputs", "imd_age_pop.rds"),
   file.path("data", "inputs", "contact_matrix.rds"),
-  file.path("data", "inputs", "known_parameters.rds"),
-  file.path("data", "inputs", "unknown_parameters.rds"),
-  file.path("data", "inputs", "dummy_infections.rds")
+  file.path("data", "dummy_data", "known_parameters.rds"),
+  file.path("data", "dummy_data", "unknown_parameters.rds"),
+  file.path("data", "dummy_data", "dummy_infections.rds")
 ) else commandArgs(trailingOnly = TRUE)
   
 source(file.path('scripts','setup','colors.R'))

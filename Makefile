@@ -55,20 +55,20 @@ all_inputs: ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/imd_age_pop.rds
 
 ##### PARAMETERS ###################################################################
 
-${INPUTDIR}/known_parameters.rds: ${SETUPDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds
+${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds
 	$(call R)
 
-${INPUTDIR}/unknown_parameters.rds: ${SETUPDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds
+${DUMMYDAT}/unknown_parameters.rds: ${DUMMYDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds
 	$(call R)
 
-all_pars: ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+all_pars: ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 
 ##### DUMMY DATA ###################################################################
 
-${DUMMYDAT}/dummy_infections.rds: ${DUMMYDIR}/dummy_infections.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+${DUMMYDAT}/dummy_infections.rds: ${DUMMYDIR}/dummy_infections.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 	$(call R)
 
-${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 	$(call R)
 
 all_dummy: ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/dummy_surveillance.rds

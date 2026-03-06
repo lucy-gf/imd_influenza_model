@@ -9,7 +9,7 @@ options(dplyr.summarise.inform = FALSE)
 
 .args <- if (interactive()) c(
   file.path("data", "inputs", "imd_age_pop.rds"),
-  file.path("data", "inputs", "known_parameters.rds")
+  file.path("data", "dummy_data", "known_parameters.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
 ## read in population data
