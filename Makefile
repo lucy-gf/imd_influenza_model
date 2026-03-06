@@ -15,9 +15,12 @@ R = $(strip Rscript $^ $(1) $@)
 
 # analysis directories + build rules
 CODEDIR ?= scripts
-SETUP ?= ${CODEDIR}/setup
+SETUPDIR ?= ${CODEDIR}/setup
+DUMMYDIR ?= ${CODEDIR}/dummy_data
+MCMCDIR ?= ${CODEDIR}/mcmc
 DATADIR ?= data
 INPUTDIR ?= ${DATADIR}/inputs
+DUMMYDAT ?= ${DATADIR}/dummy_data
 CMDIR ?= ${DATADIR}/contact_matrix
 POPDIR ?= ${DATADIR}/population
 OUTDIR ?= output
@@ -42,19 +45,48 @@ SENS_ANALYSES ?= base regional
 
 ##### INPUTS ###################################################################
 
-${INPUTDIR}/contact_matrix.rds: ${CODEDIR}/load_contact_data.R ${CMDIR}/fitted_matrs_balanced.csv
+${INPUTDIR}/contact_matrix.rds: ${SETUPDIR}/load_contact_data.R ${CMDIR}/fitted_matrs_balanced.csv
 	$(call R)
 
-${INPUTDIR}/imd_age_pop.rds: ${CODEDIR}/load_pop_data.R ${POPDIR}/imd_2025.xlsx ${POPDIR}/lsoa_to_region.csv
+${INPUTDIR}/imd_age_pop.rds: ${SETUPDIR}/load_pop_data.R ${POPDIR}/imd_2025.xlsx ${POPDIR}/lsoa_to_region.csv
 	$(call R)
 
 all_inputs: ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/imd_age_pop.rds
 
-##### DUMMY DATA ###################################################################
+##### PARAMETERS ###################################################################
 
-${INPUTDIR}/dummy_flu_data.rds: ${CODEDIR}/dummy_infections.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds
+${INPUTDIR}/known_parameters.rds: ${SETUPDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds
 	$(call R)
 
-all_dummy: ${INPUTDIR}/dummy_flu_data.rds
+${INPUTDIR}/unknown_parameters.rds: ${SETUPDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds
+	$(call R)
+
+all_pars: ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+
+##### DUMMY DATA ###################################################################
+
+${DUMMYDAT}/dummy_infections.rds: ${DUMMYDIR}/dummy_infections.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+	$(call R)
+
+${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${INPUTDIR}/known_parameters.rds ${INPUTDIR}/unknown_parameters.rds
+	$(call R)
+
+all_dummy: ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/dummy_surveillance.rds
+
+
+##### MCMC FITTING ###################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

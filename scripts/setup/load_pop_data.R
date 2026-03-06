@@ -10,7 +10,7 @@ options(dplyr.summarise.inform = FALSE)
 .args <- if (interactive()) c(
   file.path("data", "population", "imd_2025.xlsx"),
   file.path("data", "population", "lsoa_to_region.csv"),
-  file.path("data", "inputs", "imd_age_pop.rds")
+  file.path("data", "inputs", "imd_age_pop.rds") 
 ) else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
