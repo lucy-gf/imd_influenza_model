@@ -51,3 +51,5 @@ rsconnect/
 # repository folders
 /data
 /output
+Rplots.pdf
+/mcmc_output

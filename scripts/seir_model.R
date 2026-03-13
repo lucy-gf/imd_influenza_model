@@ -8,12 +8,13 @@ seeiir_risk_odin <- odin::odin({
   
   # User supplied parameters
   
-  no_groups <- user()          # 80 demographic groups
-  pop[] <- user()              # length = 2 * no_groups
+  no_groups <- user()          # demographic groups
+  pop[] <- user()              
   I0[] <- user()               # initial infectious (distributed into I1)
   vacc[] <- user()             # vaccinated at t0 (enter R)
   
   trans <- user()
+  susc[] <- user()               # length = 2 * no_groups
   lat_per <- user()
   inf_per <- user()
   
@@ -27,7 +28,7 @@ seeiir_risk_odin <- odin::odin({
   I_tot[] <- I1[i] + I2[i]
   
   sij[,] <- cij[i,j] * I_tot[j] 
-  lambda[] <- trans * sum(sij[i,])
+  lambda[] <- susc[i] * trans * sum(sij[i,])
   
   newInf[] <- lambda[i] * S[i]
   
@@ -48,19 +49,22 @@ seeiir_risk_odin <- odin::odin({
   
   deriv(R[])  <- progI2[i]
   
+  deriv(V[])  <- 0
+  
   deriv(cumI[]) <- newInf[i]
   
   # Initial conditions
   
   initial(S[])  <- pop[i] - I0[i] - vacc[i]
   
-  initial(E1[]) <- 0
+  initial(E1[]) <- 0 
   initial(E2[]) <- 0
   
   initial(I1[]) <- I0[i]
   initial(I2[]) <- 0
   
-  initial(R[])  <- vacc[i]
+  initial(R[])  <- 0
+  initial(V[])  <- vacc[i]
   
   initial(cumI[]) <- 0
   
@@ -69,7 +73,7 @@ seeiir_risk_odin <- odin::odin({
   dim(pop) <- no_groups
   dim(I0) <- no_groups
   dim(vacc) <- no_groups
-  
+  dim(susc) <- no_groups
   dim(lambda) <- no_groups
   dim(newInf) <- no_groups
   
@@ -86,58 +90,7 @@ seeiir_risk_odin <- odin::odin({
   dim(I1) <- no_groups
   dim(I2) <- no_groups
   dim(R) <- no_groups
-  dim(cumI) <- no_groups
-  
-  dim(cij) <- c(no_groups, no_groups)
-  dim(sij) <- c(no_groups, no_groups)
-  
-})
-
-# seir model
-seir_odin <- odin::odin({
-  
-  no_groups <- user()
-  
-  pop[] <- user()
-  I0[] <- user()
-  
-  trans <- user()
-  lat_per <- user()
-  inf_per <- user()
-  
-  cij[,] <- user()
-  
-  sij[,] <- cij[i,j]*I[j]/sum(pop[]) # transmission matrix
-  lambda[] <- trans*sum(sij[i,]) # FOI
-  newInf[] <- lambda[i] * S[i] # Newly infected
-  onsets[] <- E[i]/lat_per
-  removal[] <- I[i]/inf_per
-  
-  # ODEs
-  deriv(S[]) <- - newInf[i]
-  deriv(E[]) <- newInf[i] - onsets[i]
-  deriv(I[]) <- onsets[i] - removal[i]
-  deriv(R[]) <- removal[i]
-  deriv(cumI[]) <- newInf[i]
-  
-  # Initial values
-  initial(S[]) <- pop[i] - I0[i]
-  initial(E[]) <- 0
-  initial(I[]) <- I0[i]
-  initial(R[]) <- 0
-  initial(cumI[]) <- 0
-  
-  # Dimensions
-  dim(pop) <- no_groups
-  dim(I0) <- no_groups
-  dim(lambda) <- no_groups
-  dim(newInf) <- no_groups
-  dim(onsets) <- no_groups
-  dim(removal) <- no_groups
-  dim(S) <- no_groups
-  dim(E) <- no_groups
-  dim(I) <- no_groups
-  dim(R) <- no_groups
+  dim(V) <- no_groups
   dim(cumI) <- no_groups
   
   dim(cij) <- c(no_groups, no_groups)
@@ -173,10 +126,16 @@ run_model <- function(
     vacc,
     cm,
     trans,
+    susc,
     lat_per,
     inf_per,
-    t_end = 365
+    t_end = 250
 ) {
+  
+  # susceptibility is age-speciifc
+  if(length(susc) != dim(cm)[1]){ 
+    susc <- rep(susc, dim(cm)[1]/length(susc))
+  }
   
   model <- seeiir_risk_odin$new(
     no_groups = ndim,
@@ -184,16 +143,31 @@ run_model <- function(
     I0 = I0,
     vacc = vacc,
     trans = trans,
+    susc = susc,
     lat_per = lat_per,
     inf_per = inf_per,
     cij = cm
   )
   
   times <- seq(0, t_end, by = 0.1)
+
+  out <- data.table(model$run(times, method = "euler"))
+  ## using euler solver for speed in the MCMC
   
-  out <- model$run(times)
+  # keep only cumI columns
+  cumI_cols <- c('t', grep('^cumI', colnames(out), value = TRUE))
+  out <- out[, ..cumI_cols]
   
-  out_formatted <- tidy_output(data.table(out))
+  out <- out[t %% 1 == 0] # keep only integer time points 
+  
+  out_formatted <- tidy_output(out)
+  
+  ## infections = cumulative(t) - cumulative(t-1)
+  setorder(out_formatted, age_grp, imd_quintile, risk_level, t)
+  out_formatted[, infections := value - shift(value, fill = 0), 
+                   by = .(age_grp, imd_quintile, risk_level)]
+  
+  out_formatted[, c('compartment','value') := NULL]
   
   return(out_formatted)
 }
@@ -218,21 +192,63 @@ tidy_output <- function(out_dt) {
   return(long_dt[, c('t','age_grp','imd_quintile','risk_level','compartment','value')])
 }
 
+#### EXPAND CONTACT MATRIX ####
+
+expand_contact_matrix <- function(c45) {
+  
+  ndim <- nrow(c45)
+  
+  stopifnot(nrow(c45) == ncol(c45))
+  
+  # Create empty 90x90 matrix
+  c90 <- matrix(0, nrow = 2*ndim, ncol = 2*ndim)
+  
+  # Fill all 4 quadrants with same matrix
+  c90[1:ndim, 1:ndim]  <- c45   # low → low
+  c90[1:ndim, (ndim+1):(2*ndim)]   <- c45   # low → high
+  c90[(ndim+1):(2*ndim), 1:ndim]   <- c45   # high → low
+  c90[(ndim+1):(2*ndim), (ndim+1):(2*ndim)] <- c45   # high → high
+  
+  return(c90)
+}
+
 #### R0 ####
 
 R0_func <- function(susceptibility,
                     inf_period,
                     beta_in,
                     cm_in,
+                    population_vector = NULL,
+                    per_capita = F,
                     R0assumed = NULL,
                     return_beta = F){
   
   ng    = dim(cm_in)[1]
   ngm   = cm_in
   
-  for (k in 1:ng){ 
-    for (j in 1:ng){
-      ngm[j,k] = beta_in*susceptibility*cm_in[j,k]*inf_period 
+  if(!is.null(colnames(cm_in))){
+    if(substr(colnames(cm_in)[1],1,1) != substr(colnames(cm_in)[2],1,1)){
+      stop('Contact matrix not arranged by IMD first!')
+    }
+  }
+  
+  if(per_capita){
+    if(is.null(population)){stop('Need population sizes')}
+    cm_in <- t(t(cm_in)*population_vector) 
+  }
+  
+  if(length(susceptibility) > 1){ # age-specific susceptibility
+    susceptibility <- rep(susceptibility, ng/length(susceptibility))
+    for (k in 1:ng){ 
+      for (j in 1:ng){
+        ngm[j,k] = beta_in*susceptibility[k]*cm_in[j,k]*inf_period 
+      }
+    }  
+  }else{
+    for (k in 1:ng){ 
+      for (j in 1:ng){
+        ngm[j,k] = beta_in*susceptibility*cm_in[j,k]*inf_period 
+      }
     }
   }
   
@@ -248,8 +264,13 @@ R0_func <- function(susceptibility,
   
 }
 
+#### FIND LAST MONDAY ####
 
-
-
+last_monday <- function(dates){
+  
+  dates <- as.Date(dates)
+  as.Date(dates - ((as.integer(format(dates, "%u")) - 1) %% 7))
+  
+}
 
 

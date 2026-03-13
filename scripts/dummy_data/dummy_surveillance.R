@@ -9,13 +9,14 @@ suppressMessages(require(readr))
 options(dplyr.summarise.inform = FALSE) 
 
 .args <- if (interactive()) c(
-  file.path("data", "inputs", "dummy_infections.rds"),
+  file.path("data", "dummy_data", "dummy_infections.rds"),
   file.path("data", "dummy_data", "known_parameters.rds"),
   file.path("data", "dummy_data", "unknown_parameters.rds"),
   file.path("data", "dummy_data", "dummy_surveillance.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
+source(file.path('scripts','seir_model.R'))
 
 set.seed(60)
 
@@ -29,6 +30,8 @@ years <- known_pars$years
 
 risk_group_pop <- known_pars$risk_group_pop
 vaccinated_pop <- known_pars$vaccinated_pop
+
+opensafely_coverage <- known_pars$proportion_observed
 
 ## UNKNOWN PARAMETERS
 unknown_pars <- readRDS(.args[3])
@@ -45,56 +48,54 @@ for(k in 1:length(infections)){
   
   cat(year_i, ', ', sep = '')
   
-  ## turn into new infections (from compartment cumI)
+  ## merge with coverage rates and attendance rates
   infections_df <- infections[[k]] %>% 
-    filter(compartment == 'cumI') %>% 
-    group_by(age_grp, imd_quintile, risk_level, pop, start_date) %>% 
-    mutate(infections = value - lag(value, default = 0)) %>% ungroup() %>% 
-    mutate(imd_quintile = as.numeric(imd_quintile),
-           infections = round(infections)) %>% ## round to nearest integer
-    select(!c(compartment,value)) %>% 
-    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile'))
+    mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
+    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile')) %>% 
+    left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
+    mutate(observed_infections = round(OS_COVERAGE*infections)) 
+  ## round to nearest integer, when considering only infections in OpenSAFELY population
   
   #### SAMPLE PRIMARY CARE ####
   
-  jitter_width <- 0.01
+  jitter_width <- 0 # 0.01 # no jitter for now
   unif_jitter <- runif(nrow(infections_df), min = -jitter_width, max = jitter_width)
   
   primary_care <- c()
   for(i in 1:nrow(infections_df)){
-    if(infections_df$infections[i] < 1){
+    if(infections_df$observed_infections[i] < 1){
       primary_care <- c(primary_care, 0)
     }else{
       prob_i <- (infections_df$gp_rate[i] + unif_jitter[i])
       if(prob_i <= 0){prob_i <- 1e-10}
-      prc_i <- rbinom(size = infections_df$infections[i], n = 1,
+      prc_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
                       prob = prob_i)
       primary_care <- c(primary_care, prc_i)
     }
   }
-  primary_care <- c(rep(0, known_pars$primary_care_delay), primary_care)
+  primary_care <- c(rep(0, 7*known_pars$primary_care_delay), primary_care)
   primary_care <- primary_care[1:nrow(infections_df)]
   
   infections_df$primary_care <- primary_care
   
   #### SAMPLE SECONDARY CARE ####
   
-  jitter_width <- 0.001
+  jitter_width <- 0 # 0.001 # no jitter for now
   unif_jitter <- runif(nrow(infections_df), min = -jitter_width, max = jitter_width)
   
   secondary_care <- c()
   for(i in 1:nrow(infections_df)){
-    if(infections_df$infections[i] < 1){
+    if(infections_df$observed_infections[i] < 1){
       secondary_care <- c(secondary_care, 0)
     }else{
       prob_i <- (infections_df$hosp_rate[i] + unif_jitter[i])
       if(prob_i <= 0){prob_i <- 1e-10}
-      sec_i <- rbinom(size = infections_df$infections[i], n = 1,
+      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
                       prob = prob_i)
       secondary_care <- c(secondary_care, sec_i)
     }
   }
-  secondary_care <- c(rep(0, known_pars$secondary_care_delay), secondary_care)
+  secondary_care <- c(rep(0, 7*known_pars$secondary_care_delay), secondary_care)
   secondary_care <- secondary_care[1:nrow(infections_df)]
   
   infections_df$secondary_care <- secondary_care
@@ -109,7 +110,7 @@ for(k in 1:length(infections)){
   key_vars <- c('date', 'age_grp', 'imd_quintile', 'risk_level', 'pop')
   
   infections_filtered <- infections_df %>% 
-    select(!!!syms(key_vars), infections, primary_care, secondary_care) %>% 
+    select(!!!syms(key_vars), infections, observed_infections, primary_care, secondary_care) %>% 
     mutate(index = k)
   
   full_df <- rbind(full_df,
@@ -119,31 +120,20 @@ for(k in 1:length(infections)){
 
 full_df_agg <- full_df %>% 
   group_by(!!!syms(key_vars), index) %>% 
-  summarise(infections = sum(infections), 
+  summarise(infections = sum(infections),
+            observed_infections = sum(observed_infections),
             primary_care = sum(primary_care), 
             secondary_care = sum(secondary_care))
- 
-full_df_agg %>% group_by(date, imd_quintile, risk_level) %>%
-  summarise(infections = sum(infections),
-            primary_care = sum(primary_care),
-            secondary_care = sum(secondary_care)) %>% 
-  filter(year(date)=='2024') %>% 
-  ggplot() +
-  geom_line(aes(date, primary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
-  geom_line(aes(date, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),lty=2) +
-  facet_grid(risk_level ~ ., scales = 'free') +
-  theme_bw() + labs(color='IMD') +
-  scale_color_manual(values = imd_quintile_colors)
 
-full_df_agg %>% group_by(date, imd_quintile) %>%
-  summarise(infections = sum(infections),
-            primary_care = sum(primary_care),
+full_df_agg %>% mutate(date = last_monday(date)) %>% 
+  group_by(date, imd_quintile) %>%
+  summarise(primary_care = sum(primary_care),
             secondary_care = sum(secondary_care)) %>% 
-  filter(year(date)=='2024') %>% 
+  pivot_longer(c(primary_care,secondary_care)) %>% 
   ggplot() +
-  geom_line(aes(date, primary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
-  geom_line(aes(date, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),lty=2) +
-  theme_bw() + labs(color='IMD') +
+  geom_point(aes(date, value, col = as.factor(imd_quintile), group = imd_quintile, shape = name)) +
+  scale_shape_manual(values = c(1,2)) + 
+  theme_bw() + labs(color='IMD') + facet_grid(name ~ imd_quintile, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors)
 
 ## print outcomes
@@ -152,9 +142,31 @@ cat('Outcomes per season:\n')
 
 full_df_agg %>% group_by(index) %>%
   summarise(infections = sum(infections),
+            observed_infections = sum(observed_infections),
+            proportion_observed = paste0(round(100*sum(observed_infections)/sum(infections), 2), '%'),
             primary_care = sum(primary_care),
             secondary_care = sum(secondary_care)) 
 
 #### SAVE DATA ####
 
-write_rds(full_df_agg, .args[4])
+# actual surveillance data won't include infections, 
+# and will only be weekly
+surveillance_data <- full_df_agg %>% 
+  group_by(age_grp, imd_quintile, risk_level) %>% 
+  complete(date = seq.Date(from = as.Date(paste0('01-01-',year(full_df_agg$date[1])), format = '%d-%m-%Y') + 7,
+                           to = max(full_df_agg$date), by = 1),
+           fill = list(index = 1, infections = 0, primary_care = 0, secondary_care = 0)) %>% 
+  mutate(week_start = last_monday(date)) %>% 
+  group_by(week_start, age_grp, imd_quintile, index, risk_level) %>% 
+  summarise(primary_care = sum(primary_care),
+            secondary_care = sum(secondary_care))
+
+surveillance_data %>% 
+  ggplot() +
+  geom_line(aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
+  geom_line(aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),lty=2) +
+  theme_bw() + labs(color='IMD') + facet_grid(risk_level ~ age_grp, scales = 'free') +
+  scale_color_manual(values = imd_quintile_colors)
+
+write_rds(surveillance_data, .args[4])
+

@@ -14,7 +14,7 @@ options(dplyr.summarise.inform = FALSE)
 
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
-age_labels <- unique(imd_age_pop_reg$age_grp)
+age_labels <- unique(imd_age_pop_reg$age_grp) 
 nage <- n_distinct(imd_age_pop_reg$age_grp)
 nimd <- n_distinct(imd_age_pop_reg$imd_quintile)
 
@@ -23,7 +23,7 @@ imd_age_pop <- imd_age_pop_reg %>%
   group_by(age_grp, imd_quintile) %>% 
   summarise(pop = sum(pop))
 
-imd_age_pop$age_grp <- factor(imd_age_pop$age_grp, levels = age_labels)
+imd_age_pop$age_grp <- factor(imd_age_pop$age_grp, levels = age_labels) 
 
 imd_age_pop <- imd_age_pop %>% 
   arrange(imd_quintile, age_grp)
@@ -125,9 +125,9 @@ epid_periods <- c(2, 3) # latent and infectious periods
 ## (age-dependent)
 VE_pars <- c(0.70, 0.46) # currently just using the NGIV VE estimates with no mismatching
 
-vaccination_efficacy <- c(
-  rep(VE_pars[1], 7),
-  rep(VE_pars[2], 2)
+vaccination_efficacy <- data.table(
+  age_grp = age_labels,  
+  VE = c(rep(VE_pars[1], 7), rep(VE_pars[2], 2))
 )
 
 init_infected <- 1000
@@ -136,6 +136,18 @@ init_infected <- 1000
 
 primary_care_delay <- 1
 secondary_care_delay <- 2
+
+#### OPENSAFELY COVERAGE ####
+
+## for now assuming that this is 42% everywhere,
+## but in real-world model this will vary across subgroups
+
+proportion_observed <- CJ(
+  age_grp = age_labels,
+  imd_quintile = 1:5,
+  risk_level = c('high','low'),
+  OS_COVERAGE = 0.42
+) 
 
 #### MAKE INTO LIST ####
 
@@ -147,7 +159,8 @@ known_pars <- list(
   vaccination_efficacy = vaccination_efficacy,
   init_infected = init_infected,
   primary_care_delay = primary_care_delay,
-  secondary_care_delay = secondary_care_delay
+  secondary_care_delay = secondary_care_delay,
+  proportion_observed = proportion_observed
 )
 
 #### SAVE KNOWN PARAMETERS ####

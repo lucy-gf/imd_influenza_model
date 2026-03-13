@@ -71,38 +71,35 @@ years <- known_pars$years
 
 risk_group_pop <- known_pars$risk_group_pop
 vaccinated_pop <- known_pars$vaccinated_pop
+ 
+v_p <- vaccinated_pop %>% group_by(age_grp, imd_quintile) %>% 
+  summarise(vaccinated_population = sum(vaccinated_population), pop = sum(pop)) %>% 
+  mutate(v_p = vaccinated_population/pop) %>% 
+  arrange(imd_quintile, age_grp) %>% 
+  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
+  mutate(eff_v_p = VE*v_p) ## effectively vaccinated individuals
 
 ## UNKNOWN PARAMETERS
 unknown_pars <- readRDS(.args[4])
 
-### check R0
-# for(i in 1:length(years)){
-#   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
-#   cat('R0 = ', R0_func(pars$susceptibility,
-#                 pars$infectious_period,
-#                 pars$transmissibility,
-#                 cm), '\n', sep = '')
-# }
+## check R0
+for(i in 1:length(years)){
+  pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
+  cat('R0 = ', R0_func(pars$susceptibility,
+                pars$infectious_period,
+                pars$transmissibility,
+                cm), '\n', sep = '')
+}
+## check Reff
+for(i in 1:length(years)){
+  pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
+  cat('Reff = ', R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
+                       pars$infectious_period,
+                       pars$transmissibility,
+                       cm), '\n', sep = '')
+}
 
 #### EXPAND CONTACT MATRIX ####
-
-expand_contact_matrix <- function(c45) {
-  
-  ndim <- nrow(c45)
-  
-  stopifnot(nrow(c45) == ncol(c45))
-  
-  # Create empty 90x90 matrix
-  c90 <- matrix(0, nrow = 2*ndim, ncol = 2*ndim)
-  
-  # Fill all 4 quadrants with same matrix
-  c90[1:ndim, 1:ndim]  <- c45   # low → low
-  c90[1:ndim, (ndim+1):(2*ndim)]   <- c45   # low → high
-  c90[(ndim+1):(2*ndim), 1:ndim]   <- c45   # high → low
-  c90[(ndim+1):(2*ndim), (ndim+1):(2*ndim)] <- c45   # high → high
-  
-  return(c90)
-}
 
 ## make matrix per capita
 per_cap_matrix_45 <- t(t(cm)/imd_age_pop$pop)
@@ -125,7 +122,10 @@ if(!all.equal(2*ng, ndim)){warning('dimensions not adding up')}
 pop_stratified <- c(risk_group_pop$pop - risk_group_pop$risk_population,
                     risk_group_pop$risk_population)
 
-pop_vaccinated <- c(vaccinated_pop$vaccinated_population)
+vaccinated_pop <- vaccinated_pop %>% 
+  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
+  mutate(effectively_vaccinated_population = VE*vaccinated_population)
+pop_vaccinated <- c(vaccinated_pop$effectively_vaccinated_population)
 
 tot_pop <- sum(imd_age_pop$pop)
 if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
@@ -148,6 +148,7 @@ for(i in 1:length(years)){
     vacc = pop_vaccinated,
     cm = pc_cm,
     trans = pars$transmissibility,
+    susc = pars$susceptibility,
     lat_per = pars$latent_period,
     inf_per = pars$infectious_period
     ) 
@@ -169,29 +170,24 @@ names(seasonal_seir_outputs) <- years
 #### PLOT EXAMPLES ####
   
 seasonal_seir_outputs[[1]] %>% 
-  filter(imd_quintile == 1) %>% 
   ggplot() +
-  geom_line(aes(t, value, col = compartment)) +
+  geom_line(aes(t, infections/pop, col = imd_quintile)) +
+  scale_color_manual(values = imd_quintile_colors) +
   facet_grid(age_grp ~ risk_level, scales = 'free')
-
-seasonal_seir_outputs[[1]] %>% 
-  filter(imd_quintile == 1) %>% 
-  ggplot() +
-  geom_line(aes(t, value/pop, col = compartment)) +
-  facet_grid(age_grp ~ risk_level, scales = 'free') +
-  theme_bw()
 
 #### FINAL SIZE ####
 
 plot_final_size <- function(k){
   
-  seasonal_seir_outputs[[k]][t == max(t) & compartment == 'cumI',] %>% 
+  seasonal_seir_outputs[[k]] %>% 
+    group_by(age_grp, imd_quintile, risk_level, pop) %>% 
+    summarise(infections = sum(infections)) %>% 
     ggplot() + 
-    geom_bar(aes(x = age_grp, y = 100*value/pop, fill = imd_quintile),
+    geom_bar(aes(x = age_grp, y = 100*infections/pop, fill = imd_quintile),
              stat = 'identity', position = 'dodge') + 
     theme_bw() + 
     scale_fill_manual(values = imd_quintile_colors) +
-    facet_grid(.~risk_level) + ylim(c(0, 100)) + 
+    facet_grid(.~risk_level) +
     labs(x = 'Age group', y = 'Final size (%)', fill = 'IMD quintile') +
     ggtitle(names(seasonal_seir_outputs)[k])
 

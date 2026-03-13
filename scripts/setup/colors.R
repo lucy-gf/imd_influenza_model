@@ -12,6 +12,18 @@ na_to_0 <- function(x){
   x
 }
 
+susc_vector <- function(x,
+                        rep1 = 3,
+                        rep2 = 4,
+                        rep3 = 2){
+  if(length(x) != 3){stop('Length not 3')}
+  
+  x <- unname(unlist(x))
+  
+  c(rep(x[1],rep1), rep(x[2],rep2), rep(x[3],rep3))
+  
+}
+
 simp_labels <- function(string){
   if(string == 'p_sec_input'){return('nssec')}
   string <- gsub('_group','',string)
@@ -144,6 +156,8 @@ colors_p_age_group_nhs <- c('0-4' = '#4d004b',
                            '50-69' = '#fe9929',
                            '70-79' = '#ef6548',
                            '80+' = '#990000')
+
+age_colors <- colors_p_age_group_nhs
 
 colors_age_grp <- c('Aged 4 years and under' = '#4d004b', 'Aged 5 to 9 years' = '#7a0177',
                         'Aged 10 to 14 years' = '#ae017e', 'Aged 15 to 19 years' = '#dd3497',
