@@ -130,8 +130,6 @@ vaccination_efficacy <- data.table(
   VE = c(rep(VE_pars[1], 7), rep(VE_pars[2], 2))
 )
 
-init_infected <- 1000
-
 #### DELAYS ####
 
 primary_care_delay <- 1
@@ -157,7 +155,6 @@ known_pars <- list(
   vaccinated_pop = vaccinated_pop,
   epid_periods = epid_periods,
   vaccination_efficacy = vaccination_efficacy,
-  init_infected = init_infected,
   primary_care_delay = primary_care_delay,
   secondary_care_delay = secondary_care_delay,
   proportion_observed = proportion_observed

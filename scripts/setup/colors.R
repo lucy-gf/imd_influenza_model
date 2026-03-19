@@ -16,11 +16,26 @@ susc_vector <- function(x,
                         rep1 = 3,
                         rep2 = 4,
                         rep3 = 2){
-  if(length(x) != 3){stop('Length not 3')}
   
   x <- unname(unlist(x))
   
+  if(length(x) %notin% 2:3){stop('Length not 2 or 3')}
+  if(length(x) == 2){x <- c(x[1], 1, x[2])}
+
   c(rep(x[1],rep1), rep(x[2],rep2), rep(x[3],rep3))
+  
+}
+
+imd_spline <- function(imd_pars){
+  
+  if(length(imd_pars) != 2){stop('Input length not 2')}
+  
+  # IMD 1 is exp(imd_pars[1]) times the reporting rate of IMD 3,
+  # IMD 5 is exp(imd_pars[1]) times the reporting rate of IMD 3
+  
+  x <- exp(imd_pars)
+  
+  c(x[1], 1 + (x[1] - 1)/2, 1, 1 + (x[2] - 1)/2, x[2])
   
 }
 

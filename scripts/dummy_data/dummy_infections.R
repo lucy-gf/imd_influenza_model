@@ -83,6 +83,7 @@ v_p <- vaccinated_pop %>% group_by(age_grp, imd_quintile) %>%
 unknown_pars <- readRDS(.args[4])
 
 ## check R0
+cat('\n')
 for(i in 1:length(years)){
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
   cat('R0 = ', R0_func(pars$susceptibility,
@@ -91,6 +92,7 @@ for(i in 1:length(years)){
                 cm), '\n', sep = '')
 }
 ## check Reff
+cat('\n')
 for(i in 1:length(years)){
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
   cat('Reff = ', R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
@@ -98,6 +100,7 @@ for(i in 1:length(years)){
                        pars$transmissibility,
                        cm), '\n', sep = '')
 }
+cat('\n')
 
 #### EXPAND CONTACT MATRIX ####
 
@@ -130,10 +133,6 @@ pop_vaccinated <- c(vaccinated_pop$effectively_vaccinated_population)
 tot_pop <- sum(imd_age_pop$pop)
 if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
 
-init_infected_num <- known_pars$init_infected
-init_infected_vec <- (pop_stratified - pop_vaccinated)*init_infected_num/(tot_pop-sum(pop_vaccinated))
-if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
-
 #### RUN EACH SEASON ####
 
 seasonal_seir_outputs <- list()
@@ -141,6 +140,10 @@ seasonal_seir_outputs <- list()
 for(i in 1:length(years)){
   
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
+  
+  init_infected_num <- pars$init_infected
+  init_infected_vec <- (pop_stratified - pop_vaccinated)*init_infected_num/(tot_pop-sum(pop_vaccinated))
+  if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
   
   time_series <- run_model(
     pop = pop_stratified,

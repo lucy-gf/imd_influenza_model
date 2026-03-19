@@ -1,4 +1,4 @@
-## MCMC FITTING - UNKNOWN REPORTING RATES ##
+## MCMC FITTING ##
 
 #### SETUP ####
 suppressMessages(require(ggplot2))
@@ -15,7 +15,7 @@ options(dplyr.summarise.inform = FALSE)
     file.path("data", "inputs", "contact_matrix.rds"),
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
-    file.path("output", "data", "mcmc_samples_rates_unknown.rds")
+    file.path("output", "data", "mcmc_samples.rds")
   ) #else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
@@ -114,6 +114,12 @@ demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
 tot_pop <- sum(imd_age_pop$pop)
 if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
 
+## for now also know reporting rates
+unknown_pars <- readRDS(file.path("data", "dummy_data", "unknown_parameters.rds"))
+care_rates <- unknown_pars$care_rates %>% 
+  rename(primary_care = gp_rate,
+         secondary_care = hosp_rate)
+
 #### RUNNING MCMC ####
 
 nchains <- 3
@@ -129,14 +135,10 @@ mcmc_parallel <- function(i){
     cm_input = pc_cm, 
     epidemic_to_fit = surveillance_data %>% filter(index==i), 
     epid_periods = known_pars$epid_periods,
+    reporting_rates = care_rates,
     coverage_rates = known_pars$proportion_observed,
     care_delays = delays,
-    initial_parameters = c(0.07, rep(1, 2), 2, 
-                           rep(0.02, 6), rep(0.002, 6),
-                           rep(0, 4)),
-    # c(transmissibility, 2x relative susceptibility, log of initial infected, 
-    #   reporting rates for primary care, reporting rates for secondary care,
-    #   IMD spline parameters x4)
+    initial_parameters = c(0.05, 1, 1, 2), # c(transmissibility, 2x relative susceptibility, log of initial infected)
     n_samples = n_samples*nchains, 
     nburn = burn_in*nchains, 
     thinning = thinning_value,
@@ -149,7 +151,9 @@ mcmc_results <- mclapply(1:3, mcmc_parallel, mc.cores = 3)
 
 time <- Sys.time(); time <- gsub(' ', '_', time)
 
-write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_', time, '.rds'),
+write_rds(dmcmc_results, .args[5]) # dummy save
+
+write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_',time,'.rds'),
                              .args[5])) # in case next save fails
 
 mcmc_results <- c(mcmc_results,
@@ -157,7 +161,6 @@ mcmc_results <- c(mcmc_results,
 
 #### SAVE ####
 
-write_rds(data.table(x=1), .args[5]) # dummy save
-write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_', time, '.rds'),
+write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_',time,'.rds'),
                              .args[5]))
 

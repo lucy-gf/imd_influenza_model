@@ -6,6 +6,7 @@ suppressMessages(require(tidyverse))
 suppressMessages(require(dplyr))
 suppressMessages(require(data.table))
 suppressMessages(require(readr))
+suppressMessages(require(scales))
 options(dplyr.summarise.inform = FALSE) 
 
 .args <- if (interactive()) c(
@@ -51,7 +52,7 @@ for(k in 1:length(infections)){
   ## merge with coverage rates and attendance rates
   infections_df <- infections[[k]] %>% 
     mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
-    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile')) %>% 
+    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile', 'risk_level')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
     mutate(observed_infections = round(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population
@@ -131,10 +132,13 @@ full_df_agg %>% mutate(date = last_monday(date)) %>%
             secondary_care = sum(secondary_care)) %>% 
   pivot_longer(c(primary_care,secondary_care)) %>% 
   ggplot() +
+  geom_line(aes(date, value, col = as.factor(imd_quintile), group = imd_quintile)) +
   geom_point(aes(date, value, col = as.factor(imd_quintile), group = imd_quintile, shape = name)) +
   scale_shape_manual(values = c(1,2)) + 
   theme_bw() + labs(color='IMD') + facet_grid(name ~ imd_quintile, scales = 'free') + 
-  scale_color_manual(values = imd_quintile_colors)
+  scale_color_manual(values = imd_quintile_colors) +
+  scale_x_date(breaks = "1 year", labels=date_format("%Y"))
+ggsave(gsub('data','output/figures',gsub('.rds','.png',gsub('dummy_data','dummy_infections',.args[4]))), width = 16, height = 8)
 
 ## print outcomes
 
