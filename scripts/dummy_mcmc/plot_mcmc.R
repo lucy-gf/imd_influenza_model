@@ -123,13 +123,7 @@ for(i in 1:3){
                transmissibility = unknown_pars[[paste0('epid_parameters_s',i)]]$transmissibility,
                susceptibility_1 = unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[1],
                susceptibility_2 = unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[3],
-               init_infected = unknown_pars[[paste0('epid_parameters_s',i)]]$init_infected,
-               R0 = R0_func(susceptibility = c(rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[1],3),
-                                               rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[2],4),
-                                               rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[3],2)),
-                            inf_period = known_pars$epid_periods[2],
-                            beta_in = unknown_pars[[paste0('epid_parameters_s',i)]]$transmissibility,
-                            cm_in = cm),
+               init_infected = log10(unknown_pars[[paste0('epid_parameters_s',i)]]$init_infected),
                primary_care_rate_children_low = unknown_pars$primary_care_rates[1],
                primary_care_rate_adults_low = unknown_pars$primary_care_rates[2],
                primary_care_rate_older_adults_low = unknown_pars$primary_care_rates[3],
@@ -145,7 +139,13 @@ for(i in 1:3){
                imd_spline_primary_1 = unknown_pars$imd_spline_pars$primary[1],
                imd_spline_primary_2 = unknown_pars$imd_spline_pars$primary[2],
                imd_spline_secondary_1 = unknown_pars$imd_spline_pars$secondary[1],
-               imd_spline_secondary_2 = unknown_pars$imd_spline_pars$secondary[2]
+               imd_spline_secondary_2 = unknown_pars$imd_spline_pars$secondary[2],
+               R0 = R0_func(susceptibility = c(rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[1],3),
+                                               rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[2],4),
+                                               rep(unique(unknown_pars[[paste0('epid_parameters_s',i)]]$susceptibility)[3],2)),
+                            inf_period = known_pars$epid_periods[2],
+                            beta_in = unknown_pars[[paste0('epid_parameters_s',i)]]$transmissibility,
+                            cm_in = cm)
     ))
 }
 epid_pars <- epid_pars %>% pivot_longer(!epidemic)
@@ -159,29 +159,30 @@ get_samples <- function(i){
   data.table(do.call(rbind, chain_list))[, epidemic := i]
 }
 
-get_samples_parallel <- function(k){
-  samp <- data.table(dat$chain[[k]])
-  samp[, chain := k][, iteration := 1:nrow(samp)]
-  samp
-}
-
 read_and_get_samples <- function(i){
-  dat <- readRDS(gsub('.rds',paste0('_rates_unknown_', i, '_3000_5_5000.rds'),.args[7]))
+  get_samples_parallel <- function(k){
+    samp <- data.table(dat$chain[[k]])
+    samp[, chain := k][, iteration := 1:nrow(samp)]
+    samp
+  }
+  dat <- readRDS(gsub('.rds',paste0('_rates_unknown_', i, '_', number_str,'.rds'),.args[7]))
   list_samples <- mclapply(1:3, get_samples_parallel)
   samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
   samples_out
 }
 
-dat_example <- readRDS(gsub('.rds',paste0('_rates_unknown_1_3000_5_5000.rds'),.args[7]))
+number_str <- '3000_10_10000'
+dat_example <- readRDS(gsub('.rds',paste0('_rates_unknown_1_', number_str,'.rds'),.args[7]))
 mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
 
 mcmc_samples[, c('LP','LPr') := NULL]
 
 fitted_pars <- unique(epid_pars$name)
 fitted_pars <- fitted_pars[fitted_pars %notin% c('epidemic', 'R0')]
+cat('\n',length(fitted_pars),' fitted parameters\n', sep = '')
 colnames(mcmc_samples) <- c(fitted_pars, 'llikelihood', 'chain', 'iteration', 'epidemic')
-mcmc_samples[, init_infected := 10^init_infected]
+# mcmc_samples[, init_infected := 10^init_infected]
 
 #### ADD R0 #### 
 cat('Adding R0: ')
@@ -203,25 +204,22 @@ for(i in 1:nrow(unique_df)){
 fitted_pars <- c(fitted_pars, 'R0')
 
 #### FILTER #### 
-burn_in <- dat_example$burn_in
+burn_in <- 70000 #dat_example$burn_in
 thinning_value <- dat_example$thinning_value
-n_samples <- dat_example$n_samples
+n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
 
 mcmc_samples_filtered <- mcmc_samples[iteration > burn_in & iteration %% thinning_value == 0,]
 mcmc_samples_filtered[, iteration := 1:n_samples, .(chain, epidemic)]
 
-# var_cols <- c('#9B7EDE','#832161','#F7B801','#52050A','#BCD2EE','#F35B04')
-# names(var_cols) <- fitted_pars
-
 #### PLOT DENSITY #### 
 densities <- map(.x = fitted_pars, .f = plot_density)
-patchwork::wrap_plots(densities, nrow = 2)
+patchwork::wrap_plots(densities, nrow = 3)
 ggsave(gsub('epidemics','densities',.args[length(.args)]), width = 12, height = 8)
 
 #### PLOT TRACE #### 
 traces <- map(.x = fitted_pars, .f = plot_trace)
-patchwork::wrap_plots(traces, nrow = 2) 
-ggsave(gsub('epidemics','traces',.args[length(.args)]), width = 15, height = 8)
+patchwork::wrap_plots(traces, nrow = 3) 
+ggsave(gsub('epidemics','traces',.args[length(.args)]), width = 21, height = 12)
 log_likelihood_plot <- plot_trace('llikelihood'); log_likelihood_plot
 ggsave(gsub('epidemics','llikelihood',.args[length(.args)]), width = 8, height = 6)
 
@@ -267,9 +265,6 @@ for(bs in 1:nrow(mcmc_samples_filtered)){
   if(bs %% (10*mod_val) == 0){cat(bs/mod_val, ', ', sep = '')}
   
 }
-
-## save
-write_rds(fitted_epidemics, gsub('mcmc','epidemic',.args[7]))
 
 ## add in start_date
 fitted_epidemics[, start_of_epidemic := as.Date(paste0('01-09-', years[1] + epidemic - 1), format = '%d-%m-%Y')]

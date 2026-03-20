@@ -114,6 +114,9 @@ variables_and_names <- list(
 
 ## COLORS FOR IMD ANALYSIS ##
 
+# var_cols <- c('#9B7EDE','#832161','#F7B801','#52050A','#BCD2EE','#F35B04')
+# names(var_cols) <- fitted_pars
+
 eng_reg_colors <- c("London"="#31688EFF", "North West" = '#CC4678FF',
                     'Yorkshire and The Humber' = '#65156EFF', "North East" = '#006837', 
                     "West Midlands" = '#F89441FF', 'East Midlands' = '#e78ac3',

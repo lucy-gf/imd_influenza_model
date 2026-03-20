@@ -126,7 +126,7 @@ epid_periods <- c(2, 3) # latent and infectious periods
 VE_pars <- c(0.70, 0.46) # currently just using the NGIV VE estimates with no mismatching
 
 vaccination_efficacy <- data.table(
-  age_grp = age_labels,  
+  age_grp = age_labels,    
   VE = c(rep(VE_pars[1], 7), rep(VE_pars[2], 2))
 )
 

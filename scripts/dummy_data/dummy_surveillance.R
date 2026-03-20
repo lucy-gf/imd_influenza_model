@@ -54,7 +54,7 @@ for(k in 1:length(infections)){
     mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
     left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile', 'risk_level')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
-    mutate(observed_infections = round(OS_COVERAGE*infections)) 
+    mutate(observed_infections = floor(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population
   
   #### SAMPLE PRIMARY CARE ####
@@ -74,8 +74,6 @@ for(k in 1:length(infections)){
       primary_care <- c(primary_care, prc_i)
     }
   }
-  primary_care <- c(rep(0, 7*known_pars$primary_care_delay), primary_care)
-  primary_care <- primary_care[1:nrow(infections_df)]
   
   infections_df$primary_care <- primary_care
   
@@ -96,8 +94,6 @@ for(k in 1:length(infections)){
       secondary_care <- c(secondary_care, sec_i)
     }
   }
-  secondary_care <- c(rep(0, 7*known_pars$secondary_care_delay), secondary_care)
-  secondary_care <- secondary_care[1:nrow(infections_df)]
   
   infections_df$secondary_care <- secondary_care
   
@@ -106,9 +102,16 @@ for(k in 1:length(infections)){
   infections_df <- infections_df %>% 
     mutate(date = start_date + t)
   
-  #### SELECT KEY VARIABLES ####
-  
+  #### ADD REPORTING DELAYS ####
   key_vars <- c('date', 'age_grp', 'imd_quintile', 'risk_level', 'pop')
+  key_vars_no_date <- key_vars[key_vars != 'date']
+  
+  infections_df <- infections_df %>% 
+    group_by(!!!syms(key_vars_no_date)) %>% 
+    mutate(primary_care = shift(primary_care, n = 7*known_pars$primary_care_delay, fill = 0),
+           secondary_care = shift(secondary_care, n = 7*known_pars$secondary_care_delay, fill = 0))
+  
+  #### SELECT KEY VARIABLES ####
   
   infections_filtered <- infections_df %>% 
     select(!!!syms(key_vars), infections, observed_infections, primary_care, secondary_care) %>% 

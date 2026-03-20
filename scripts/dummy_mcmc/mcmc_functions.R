@@ -17,6 +17,14 @@ run_mcmc_inference <- function(
     txt_output = NULL
 ) {
   
+  ## SET UP DATA FRAMES ETC. ##
+  broad_ages <- data.table(
+    age_grp = age_labels, 
+    broad_age = c(rep('children', 3), rep('adults', 4), rep('older_adults', 2))
+  )
+  epidemic_dt <- as.data.table(epidemic_to_fit)
+  coverage_rates$imd_quintile <- factor(coverage_rates$imd_quintile)
+  
   ll_call_count <- 0
   ll_total_calls <- (nburn + n_samples * thinning) * n_chains
   
@@ -46,18 +54,13 @@ run_mcmc_inference <- function(
     susceptibility <- susc_vector(pars[2:3]) 
     init_infected_num <- 10^(pars[4])
     
-    broad_ages <- data.table(
-      age_grp = age_labels, 
-      broad_age = c(rep('children', 3), rep('adults', 4), rep('older_adults', 2))
-    )
-    
     care_rate_df <- data.frame(
       broad_age = rep(unique(broad_ages$broad_age), 2),
       risk_level = rep(c('low','high'), each = 3),
       primary_care = pars[5:10],
       secondary_care = pars[11:16]
     )
-    
+
     care_rate_age_df <- data.table(cross_join(
       care_rate_df,
       broad_ages))[broad_age.x == broad_age.y,]
@@ -78,6 +81,12 @@ run_mcmc_inference <- function(
       mutate(primary_care = primary_care*rel_primary_rates,
              secondary_care = secondary_care*rel_secondary_rates) %>% 
       select(!c(rel_primary_rates, rel_secondary_rates))
+    
+    reporting_dt <- as.data.table(reporting_rates)
+    reporting_long <- melt(reporting_dt,
+                           measure.vars = c('primary_care', 'secondary_care'),
+                           variable.name = 'setting',
+                           value.name = 'rate')
     
     # any out-of-bounds proposals slipping past the prior
     if(any(is.na(pars)) || 
@@ -111,9 +120,8 @@ run_mcmc_inference <- function(
     if(any(is.na(time_series))) return(-Inf)
     
     # Take rounded value of OBSERVED infections (need an integer)
-    coverage_rates$imd_quintile <- factor(coverage_rates$imd_quintile)
     time_series <- time_series[coverage_rates, on = c('age_grp','imd_quintile','risk_level')]
-    time_series_fit <- time_series[, .(infections = round(sum(OS_COVERAGE*infections))),
+    time_series_fit <- time_series[, .(infections = floor(sum(OS_COVERAGE*infections))),
                                    by = .(date, age_grp, imd_quintile, risk_level)]
     time_series_fit[, imd_quintile := as.numeric(imd_quintile)]
     
@@ -129,9 +137,6 @@ run_mcmc_inference <- function(
     time_series_weekly <- time_series_fit[, .(infections = sum(infections)), 
                                           by = .(week_start, age_grp, imd_quintile, risk_level)]
     
-    # Convert epidemic_to_fit to data.table if not already
-    epidemic_dt <- as.data.table(epidemic_to_fit)
-    
     # Join with observed data
     time_series_joint <- merge(time_series_weekly, epidemic_dt, 
                                by = c('age_grp', 'imd_quintile', 'week_start', 'risk_level'), 
@@ -144,12 +149,6 @@ run_mcmc_inference <- function(
                              value.name = 'observations')
     
     # Join reporting rates
-    reporting_dt <- as.data.table(reporting_rates)
-    reporting_long <- melt(reporting_dt,
-                           measure.vars = c('primary_care', 'secondary_care'),
-                           variable.name = 'setting',
-                           value.name = 'rate')
-    
     time_series_long <- merge(time_series_long, reporting_long,
                               by = colnames(reporting_long)[colnames(reporting_long) != 'rate'],
                               all.x = TRUE)
@@ -168,11 +167,16 @@ run_mcmc_inference <- function(
                                                   by = .(age_grp, imd_quintile, risk_level, index, rate)])
     
     if(F){
-    time_series_shifted %>% ## plot {observations} against {infections x reporting rates}
-      ggplot() + theme_bw() +
-      geom_line(aes(week_start,rate*infections, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
-      geom_line(aes(week_start,observations, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
-      facet_grid(age_grp ~ imd_quintile, scales = 'free')
+      time_series_shifted %>% ## plot {observations} against {infections x reporting rates}
+        ggplot() + theme_bw() +
+        geom_line(aes(week_start,rate*infections, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
+        geom_line(aes(week_start,observations, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
+        facet_grid(age_grp ~ imd_quintile, scales = 'free')
+      time_series_shifted %>%
+        ggplot() + theme_bw() +
+        geom_jitter(aes(week_start, infections >= observations, shape=risk_level, col=setting, 
+                        group=interaction(setting, risk_level)), width = 1, height = 0.1) +
+        facet_grid(age_grp ~ imd_quintile, scales = 'free') # should be TRUE everywhere
       }
     
     # Vectorised log likelihood
@@ -319,11 +323,11 @@ run_mcmc_inference <- function(
   )
   
   settings <- list(
-    iterations = nburn + n_samples*thinning, 
+    iterations = nburn + n_samples*thinning, ## setup to save all (pre-thinning etc.)
     burnin = 0,
     thin = 1,
     message = T, nrChains=n_chains, parallel = F
-  ) ## setup to save all (pre-thinning etc.)
+  ) 
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
   
@@ -359,7 +363,7 @@ plot_trace <- function(var, filtered = F){
     geom_line(aes(x = iteration, y = value, col = as.factor(chain), group = chain)) +
     geom_hline(data = epid_pars %>% mutate(epidemic = paste0("Epidemic ", epidemic)) %>% filter(name==var),
                aes(yintercept = value), lty=2) +
-    geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
+    # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
     facet_grid(.~epidemic) +
     theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
     # scale_color_manual(values = var_cols) +
