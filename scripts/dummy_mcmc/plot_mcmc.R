@@ -242,7 +242,7 @@ for(bs in 1:nrow(mcmc_samples_filtered)){
   
   if(bs %% mod_val != 0){next} 
   
-  init_infected_num <- mcmc_samples_filtered$init_infected[bs]
+  init_infected_num <- 10^(mcmc_samples_filtered$init_infected[bs])
   init_infected_vec <- (demography$population - pop_vaccinated)*init_infected_num/
     (sum(demography$population)-sum(pop_vaccinated))
   
