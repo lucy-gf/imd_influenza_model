@@ -8,6 +8,7 @@ suppressMessages(require(data.table))
 suppressMessages(require(readr))
 suppressMessages(require(BayesianTools))
 suppressMessages(require(patchwork))
+suppressMessages(require(GGally))
 suppressMessages(require(parallel))
 options(dplyr.summarise.inform = FALSE) 
 
@@ -51,6 +52,11 @@ imd_age_pop$age_grp <- factor(imd_age_pop$age_grp, levels = age_labels)
 imd_age_pop <- imd_age_pop %>% 
   arrange(imd_quintile, age_grp)
 
+broad_ages <- data.table(
+  age_grp = age_labels, 
+  broad_age = c(rep('children', 3), rep('adults', 4), rep('older_adults', 2))
+)
+
 ## read in contact matrix
 contact_matrix_1000 <- readRDS(.args[2])
 
@@ -76,6 +82,13 @@ cm <- contact_matrix %>% ungroup() %>%
   select(p_var,c_var,n) %>% 
   pivot_wider(names_from = c_var, values_from = n) %>% 
   select(!p_var) %>% as.matrix()
+
+## make matrix per capita
+per_cap_matrix_45 <- t(t(cm)/imd_age_pop$pop)
+
+## scale up for both risk groups 
+## (assuming per capita contacts are independent of risk level)
+pc_cm <- expand_contact_matrix(per_cap_matrix_45)
 
 #### TRUE INFECTIONS DATA #### 
 true_infections_list <- readRDS(.args[3])
@@ -130,7 +143,7 @@ for(i in 1:3){
                primary_care_rate_children_high = unknown_pars$primary_care_rates[4],
                primary_care_rate_adults_high = unknown_pars$primary_care_rates[5],
                primary_care_rate_older_adults_high = unknown_pars$primary_care_rates[6],
-               secondary_care_rate_children_low = unknown_pars$primary_care_rates[1],
+               secondary_care_rate_children_low = unknown_pars$secondary_care_rates[1],
                secondary_care_rate_adults_low = unknown_pars$secondary_care_rates[2],
                secondary_care_rate_older_adults_low = unknown_pars$secondary_care_rates[3],
                secondary_care_rate_children_high = unknown_pars$secondary_care_rates[4],
@@ -172,7 +185,7 @@ read_and_get_samples <- function(i){
   samples_out
 }
 
-number_str <- '3000_10_10000'
+number_str <- '0_10_40000'
 dat_example <- readRDS(gsub('.rds',paste0('_rates_unknown_1_', number_str,'.rds'),.args[7]))
 mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
 
@@ -187,6 +200,8 @@ colnames(mcmc_samples) <- c(fitted_pars, 'llikelihood', 'chain', 'iteration', 'e
 #### ADD R0 #### 
 cat('Adding R0: ')
 unique_df <- unique(mcmc_samples[, ..fitted_pars])
+mod_val <- if(nrow(unique_df) > 50000){1000}else{
+  ifelse(nrow(unique_df) > 5000,100,10)}
 for(i in 1:nrow(unique_df)){
   row <- unique_df[i, ]
   mcmc_samples[transmissibility == row$transmissibility &
@@ -198,13 +213,13 @@ for(i in 1:nrow(unique_df)){
                              beta_in = row$transmissibility,
                              cm_in = cm)
                ]
-  if(i %% 100 == 0){cat(round(100*i/nrow(unique_df)), '%, ', sep='')}
+  if(i %% 100 == mod_val){cat(round(100*i/nrow(unique_df)), '%, ', sep='')}
 }
 
 fitted_pars <- c(fitted_pars, 'R0')
 
 #### FILTER #### 
-burn_in <- 70000 #dat_example$burn_in
+burn_in <- 100000 #dat_example$burn_in
 thinning_value <- dat_example$thinning_value
 n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
 
@@ -214,12 +229,15 @@ mcmc_samples_filtered[, iteration := 1:n_samples, .(chain, epidemic)]
 #### PLOT DENSITY #### 
 densities <- map(.x = fitted_pars, .f = plot_density)
 patchwork::wrap_plots(densities, nrow = 3)
-ggsave(gsub('epidemics','densities',.args[length(.args)]), width = 12, height = 8)
+ggsave(gsub('epidemics','densities',.args[length(.args)]), width = 30, height = 14)
 
 #### PLOT TRACE #### 
 traces <- map(.x = fitted_pars, .f = plot_trace)
 patchwork::wrap_plots(traces, nrow = 3) 
-ggsave(gsub('epidemics','traces',.args[length(.args)]), width = 21, height = 12)
+ggsave(gsub('epidemics','traces',.args[length(.args)]), width = 30, height = 14)
+traces <- map(.x = fitted_pars, .f = ~{plot_trace(var=.x, filtered=T)})
+patchwork::wrap_plots(traces, nrow = 3) 
+ggsave(gsub('epidemics','filtered_traces',.args[length(.args)]), width = 30, height = 14)
 log_likelihood_plot <- plot_trace('llikelihood'); log_likelihood_plot
 ggsave(gsub('epidemics','llikelihood',.args[length(.args)]), width = 8, height = 6)
 
@@ -229,12 +247,24 @@ mcmc_samples_filtered %>%
   geom_point(aes(x = transmissibility, y = value, col = as.factor(epidemic), shape = name)) +
   theme_bw() + labs(col='Epidemic', shape='') + facet_grid(. ~ name)
 
+## pairwise plots
+# only taking 1% of the mcmc_samples_filtered dataset as it takes too long otherwise!
+pairs_data <- mcmc_samples_filtered[seq(1, nrow(mcmc_samples_filtered), by = 100), c(1:20, 24)]
+colnames(pairs_data) <- gsub('_rate_','_rate\n_', colnames(pairs_data))
+colnames(pairs_data) <- gsub('_spline_','_spline\n_', colnames(pairs_data))
+p <- ggpairs(pairs_data, columns = 1:4, aes(color = as.factor(epidemic), alpha = 0.5))
+print(p)
+p_FULL <- ggpairs(pairs_data, columns = 1:20, aes(color = as.factor(epidemic), alpha = 0.5))
+print(p_FULL)
+ggsave(gsub('epidemics','pairwise',.args[length(.args)]), width = 30, height = 30)
+
 #### RUN FITTED EPIDEMICS #### 
 
 pop_vaccinated <- vaccinated_pop$effectively_vaccinated_population
 
-## only do for every tenth/hundredth epidemic to save time
-mod_val <- ifelse(nrow(mcmc_samples_filtered) > 10000, 100, 10)
+## only do for every tenth/hundredth/thousandth epidemic to save time
+mod_val <- if(nrow(mcmc_samples_filtered) > 100000){1000}else{
+  ifelse(nrow(mcmc_samples_filtered) > 10000,100,10)}
 
 cat('\nRunning fitted epidemics (', nrow(mcmc_samples_filtered)/mod_val, ' total): ', sep = '')
 fitted_epidemics <- data.table()
@@ -266,17 +296,62 @@ for(bs in 1:nrow(mcmc_samples_filtered)){
   
 }
 
-## add in start_date
+## make long reporting rates data table
+
+## column names
+primary_names <- paste0('primary_imd_', 1:5)
+secondary_names <- paste0('secondary_imd_', 1:5)
+
+## apply imd_spline function
+rep_rates <- mcmc_samples_filtered %>% 
+  bind_cols(pmap(list(mcmc_samples_filtered$imd_spline_primary_1, mcmc_samples_filtered$imd_spline_primary_2),
+      function(x, y) {
+        result <- imd_spline(c(x, y))
+        setNames(as.list(result), primary_names)
+      }) %>% bind_rows()) %>% 
+  bind_cols(pmap(list(mcmc_samples_filtered$imd_spline_secondary_1, mcmc_samples_filtered$imd_spline_secondary_2),
+                 function(x, y) {
+                   result <- imd_spline(c(x, y))
+                   setNames(as.list(result), secondary_names)
+                 }) %>% bind_rows())
+
+age_risk_rates <- rep_rates %>% 
+  select(contains('rate'), chain, iteration, epidemic) %>%
+  pivot_longer(!c(chain,iteration,epidemic)) %>% 
+  mutate(care_setting = case_when(substr(name, 1, 1) == 'p' ~ 'primary_rate', T ~ 'secondary_rate'),
+         risk_level = case_when(grepl('low', name) ~ 'low', T ~ 'high'),
+         broad_age = case_when(grepl('children', name) ~ 'children', 
+                               grepl('older_adults', name) ~ 'older_adults', 
+                               T ~ 'adults')) %>% 
+  select(!name)
+
+imd_rates <- rep_rates %>% 
+  select(contains('ary_imd'), chain, iteration, epidemic) %>%
+  pivot_longer(!c(chain,iteration,epidemic)) %>% 
+  mutate(care_setting = case_when(substr(name, 1, 1) == 'p' ~ 'primary_rate', T ~ 'secondary_rate'),
+         imd_quintile = as.factor(gsub('primary_imd_|secondary_imd_','',name))) %>% 
+  select(!name)
+
+mcmc_surveillance_rates <- full_join(
+  age_risk_rates, imd_rates, by = c('chain','iteration','epidemic','care_setting'), relationship = "many-to-many"
+) %>% mutate(value = value.x*value.y) %>% select(!c(value.x, value.y))
+
+mcmc_surveillance_rates_w <- mcmc_surveillance_rates %>% 
+  pivot_wider(names_from = 'care_setting', values_from = value)
+
+## add in start_date, reporting rates
 fitted_epidemics[, start_of_epidemic := as.Date(paste0('01-09-', years[1] + epidemic - 1), format = '%d-%m-%Y')]
 fitted_epidemics[, date := start_of_epidemic + t] ## add date
-fitted_epidemics[, c('t','start_of_epidemic','epidemic') := NULL]
+fitted_epidemics[, c('t','start_of_epidemic') := NULL]
 
 # aggregate week
 fitted_epidemics[, date := last_monday(date)]
 fitted_epidemics_agg <- fitted_epidemics[, .(infections = ceiling(sum(infections))),
-                                             by = .(date, chain, iteration, age_grp, imd_quintile, risk_level)]
+                                             by = .(date, epidemic, chain, iteration, age_grp, imd_quintile, risk_level)]
 
-fitted_epidemics_agg[, c('iteration','chain') := NULL]
+fitted_epidemics_surv <- copy(fitted_epidemics_agg) ## copy for surveillance data
+
+fitted_epidemics_agg[, c('epidemic','iteration','chain') := NULL]
 fitted_epidemics_agg_m <- rbind(
   fitted_epidemics_agg[, lapply(.SD, median), by = c('date', 'age_grp', 'imd_quintile', 'risk_level')][, measure := 'median'],
   fitted_epidemics_agg[, lapply(.SD, max), by = c('date', 'age_grp', 'imd_quintile', 'risk_level')][, measure := 'u'],
@@ -297,7 +372,7 @@ true_infections <- true_infections[, date := last_monday(date)][, lapply(.SD, su
 
 ## combine
 fitted_and_obs <- fitted_epidemics_agg_l %>% 
-  left_join(true_infections, by = c('date','age_grp','imd_quintile','risk_level'))
+  left_join(true_infections, by = c('date','age_grp','imd_quintile','risk_level')) 
 
 #### PLOT FITTED EPIDEMICS #### 
 fitted_and_obs %>% 
@@ -309,7 +384,7 @@ fitted_and_obs %>%
   scale_color_manual(values = imd_quintile_colors) +
   scale_fill_manual(values = imd_quintile_colors)
 
-fitted_and_obs %>% filter(imd_quintile == 1, age_grp=='0-4', risk_level == 'high') %>% 
+fitted_and_obs %>% filter(imd_quintile == 3, age_grp=='5-11', risk_level == 'low') %>% 
   mutate(imd_quintile := paste0('IMD ', imd_quintile)) %>% 
   ggplot() + 
   geom_ribbon(aes(date, ymin=l, ymax=u, group=age_grp, fill=age_grp), alpha=0.4) +
@@ -341,47 +416,67 @@ ggsave(.args[length(.args)], width = 16, height = 12)
 
 ## fitted surveillance data
 
-fitted_primary_plot <- fitted_epidemics_agg_l %>% 
+fitted_surv_dat <- fitted_epidemics_surv %>% 
+  left_join(broad_ages, by = 'age_grp') %>% 
   left_join(surveillance_data %>% 
-              rename(date = week_start) %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('date','age_grp','imd_quintile','risk_level')) %>% 
-  left_join(care_rates %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('age_grp','imd_quintile','risk_level'), suffix = c('','_rate')) %>% 
+              rename(date = week_start, epidemic = index) %>% mutate(imd_quintile = as.factor(imd_quintile)), 
+            by = c('date','age_grp','imd_quintile','risk_level', 'epidemic')) %>% 
+  left_join(mcmc_surveillance_rates_w,
+            by = c('broad_age','imd_quintile','risk_level','chain','iteration','epidemic')) %>% 
   left_join(known_pars$proportion_observed %>% mutate(imd_quintile = as.factor(imd_quintile)), 
             by = c('age_grp','imd_quintile','risk_level')) %>% 
+  mutate(observed_primary = infections*primary_rate*OS_COVERAGE,
+         observed_secondary = infections*secondary_rate*OS_COVERAGE) %>% 
+  group_by(iteration, chain, date, age_grp, imd_quintile, 
+           risk_level, primary_care, secondary_care) %>% 
+  summarise(observed_primary = sum(observed_primary),
+            observed_secondary = sum(observed_secondary))
+fitted_surv_dat <- data.table(fitted_surv_dat)
+
+fitted_surv_dat[, c('iteration', 'chain') := NULL]
+
+fitted_surv_agg <- rbind(
+  fitted_surv_dat[, lapply(.SD, median), by = c('date', 'age_grp', 'imd_quintile', 'risk_level', 'primary_care', 'secondary_care')][, measure := 'median'],
+  fitted_surv_dat[, lapply(.SD, max), by = c('date', 'age_grp', 'imd_quintile', 'risk_level', 'primary_care', 'secondary_care')][, measure := 'u'],
+  fitted_surv_dat[, lapply(.SD, min), by = c('date', 'age_grp', 'imd_quintile', 'risk_level', 'primary_care', 'secondary_care')][, measure := 'l'])
+
+fitted_surv_agg <- fitted_surv_agg %>% 
   mutate(imd_quintile := paste0('IMD ', imd_quintile)) %>% 
   group_by(age_grp, imd_quintile, risk_level) %>% 
-  mutate(fitted_pc = lag(median, default=0)*primary_care_rate*OS_COVERAGE,
-         fitted_pc_l = lag(l, default=0)*primary_care_rate*OS_COVERAGE,
-         fitted_pc_u = lag(u, default=0)*primary_care_rate*OS_COVERAGE) %>% 
+  mutate(observed_primary = lag(observed_primary, default=0),
+         observed_secondary = lag(lag(observed_secondary, default=0), default=0)) 
+
+fitted_primary_plot <- fitted_surv_agg %>%
+  select(!observed_secondary) %>% 
+  pivot_wider(names_from = measure, values_from = observed_primary) %>% 
   ggplot() + 
-  geom_ribbon(aes(date, ymin=fitted_pc_l, ymax=fitted_pc_u, group=interaction(age_grp,risk_level), fill=risk_level), alpha=0.4) +
-  geom_line(aes(date, fitted_pc, group=interaction(age_grp,risk_level), col=risk_level)) +
+  geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,risk_level), fill=risk_level), alpha=0.4) +
+  geom_line(aes(date, median, group=interaction(age_grp,risk_level), col=risk_level)) +
   geom_point(aes(date, primary_care, group=interaction(age_grp,risk_level), col=risk_level), shape = 1, alpha = 0.6) +
   facet_grid(age_grp~imd_quintile, scales='free') + theme_bw() +
-  # scale_color_manual(values = age_colors) +
-  # scale_fill_manual(values = age_colors) +
-  theme(legend.position = 'none',
-        text = element_text(size=14)) +
+  theme(text = element_text(size=14)) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
   labs(y = 'primary care', x = ''); fitted_primary_plot
 
-fitted_secondary_plot <- fitted_epidemics_agg_l %>% 
-  left_join(surveillance_data %>% 
-              rename(date = week_start) %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('date','age_grp','imd_quintile','risk_level')) %>% 
-  left_join(care_rates %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('age_grp','imd_quintile','risk_level'), suffix = c('','_rate')) %>% 
-  left_join(known_pars$proportion_observed %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('age_grp','imd_quintile','risk_level')) %>% 
-  mutate(imd_quintile := paste0('IMD ', imd_quintile)) %>% 
-  group_by(age_grp, imd_quintile) %>% 
-  mutate(fitted_sc = lag(lag(median, default=0), default=0)*secondary_care_rate*OS_COVERAGE,
-         fitted_sc_l = lag(lag(l, default=0), default=0)*secondary_care_rate*OS_COVERAGE,
-         fitted_sc_u = lag(lag(u, default=0), default=0)*secondary_care_rate*OS_COVERAGE) %>% 
+fitted_secondary_plot <- fitted_surv_agg %>%
+  select(!observed_primary) %>% 
+  pivot_wider(names_from = measure, values_from = observed_secondary) %>% 
   ggplot() + 
-  geom_ribbon(aes(date, ymin=fitted_sc_l, ymax=fitted_sc_u, group=interaction(age_grp,risk_level), fill=risk_level), alpha=0.4) +
-  geom_line(aes(date, fitted_sc, group=interaction(age_grp,risk_level), col=risk_level)) +
+  geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,risk_level), fill=risk_level), alpha=0.4) +
+  geom_line(aes(date, median, group=interaction(age_grp,risk_level), col=risk_level)) +
+  geom_point(aes(date, secondary_care, group=interaction(age_grp,risk_level), col=risk_level), shape = 1, alpha = 0.6) +
+  facet_grid(age_grp~imd_quintile, scales='free') + theme_bw() +
+  theme(text = element_text(size=14)) +
+  scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
+  labs(y = 'primary care', x = ''); fitted_secondary_plot
+
+fitted_surv_agg %>%
+  select(!observed_primary) %>% 
+  filter(imd_quintile == 'IMD 3', age_grp == '5-11', risk_level == 'low') %>% 
+  pivot_wider(names_from = measure, values_from = observed_secondary) %>% 
+  ggplot() + 
+  geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,risk_level), fill=risk_level), alpha=0.4) +
+  geom_line(aes(date, median, group=interaction(age_grp,risk_level), col=risk_level)) +
   geom_point(aes(date, secondary_care, group=interaction(age_grp,risk_level), col=risk_level), shape = 1, alpha = 0.6) +
   facet_grid(age_grp~imd_quintile, scales='free') + theme_bw() +
   # scale_color_manual(values = age_colors) +
@@ -389,7 +484,7 @@ fitted_secondary_plot <- fitted_epidemics_agg_l %>%
   theme(legend.position = 'none',
         text = element_text(size=14)) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
-  labs(y = 'secondary care', x = ''); fitted_secondary_plot
+  labs(y = 'secondary care', x = '')
 
 ## SAVE PNGs
 fitted_primary_plot

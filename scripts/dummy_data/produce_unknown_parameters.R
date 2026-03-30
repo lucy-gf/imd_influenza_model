@@ -139,14 +139,24 @@ care_rate_imd_df <- cross_join(
 
 care_rate_imd_df$age_grp <- factor(care_rate_imd_df$age_grp, levels = age_labels) 
 
-care_rate_imd_df %>% 
+ratep1 <- care_rate_imd_df %>% 
   pivot_longer(c(gp_rate, hosp_rate)) %>% 
   ggplot() + 
   geom_line(aes(age_grp, value, group = interaction(name,imd_quintile), 
                 col = as.factor(imd_quintile)), lwd = 0.8) +
   theme_bw() + ylim(c(0,NA)) + facet_grid(name ~ risk_level, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors) +
-  labs(y='rate', lty = 'care setting', col = 'IMD quintile')
+  labs(y='Rate', lty = 'care setting', col = 'IMD quintile'); ratep1
+
+ratep2 <- rel_imd_rep_rates %>% 
+  pivot_longer(!imd_quintile) %>%
+  ggplot() + 
+  geom_line(aes(imd_quintile, value, group = name, lty = name), lwd = 0.8) +
+  theme_bw() + ylim(c(0,NA)) +
+  labs(y='Relative rate (baseline = IMD 3)', lty = 'Care setting', col = 'IMD quintile'); ratep2
+
+ratep1 + ratep2 + plot_layout(nrow = 1, widths = c(2,1))
+ggsave(file.path('output','figures','dummy_mcmc','reporting_rates.png'), width = 16, height = 7)
 
 #### MAKE INTO LIST ####
 

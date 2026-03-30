@@ -355,6 +355,9 @@ plot_density <- function(var, filtered = T){
 
 plot_trace <- function(var, filtered = F){
   data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples}
+  Y_LAB <- if(var=='R0'){'R0 (calculated after)'}else{
+    if(var=='init_infected'){'Initial infected (log10)'}else{var}
+  }
   p <- data %>%
     mutate(epidemic = paste0("Epidemic ", epidemic)) %>% 
     pivot_longer(!c(iteration,epidemic,chain)) %>%
@@ -365,7 +368,7 @@ plot_trace <- function(var, filtered = F){
                aes(yintercept = value), lty=2) +
     # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
     facet_grid(.~epidemic) +
-    theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
+    theme_bw() + labs(y = Y_LAB) +
     # scale_color_manual(values = var_cols) +
     theme(legend.position = 'none')
   

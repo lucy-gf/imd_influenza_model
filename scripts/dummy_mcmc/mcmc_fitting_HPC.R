@@ -145,12 +145,6 @@ mcmc_results <- run_mcmc_inference(
   txt_output = i
 )
 
-write_rds(mcmc_results, gsub('.rds',paste0('_', i, '_', burn_in,'_',thinning_value,'_',n_samples,'.rds'),
-                             .args[5])) # in case next save fails
-
-mcmc_results <- c(mcmc_results,
-                  list(burn_in=burn_in, thinning_value=thinning_value, n_samples=n_samples))
-
 #### SAVE ####
 
 write_rds(data.table(x=1), .args[5]) # dummy save
