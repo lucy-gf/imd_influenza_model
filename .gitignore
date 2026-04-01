@@ -53,3 +53,4 @@ rsconnect/
 /output
 Rplots.pdf
 /mcmc_output
+/bash
