@@ -19,7 +19,7 @@ options(dplyr.summarise.inform = FALSE)
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
     file.path("data", "dummy_data", "unknown_parameters.rds"),
-    file.path("output", "data", "mcmc_samples.rds"),
+    file.path("output", "data", "mcmc_samples_rates_unknown.rds"),
     file.path("output", "figures", "dummy_mcmc", "fitted_epidemics.png")
   ) #else commandArgs(trailingOnly = TRUE)
 
@@ -28,7 +28,7 @@ source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
 if(!dir.exists(gsub('fitted_epidemics.png','',.args[length(.args)]))){
-  dir.create(gsub('fitted_epidemics.png','',.args[length(.args)]))
+  dir.create(gsub('fitted_epidemics.png','',.args[length(.args)]), recursive=T)
 }
 
 set.seed(60)
@@ -178,24 +178,39 @@ read_and_get_samples <- function(i){
     samp[, chain := k][, iteration := 1:nrow(samp)]
     samp
   }
-  dat <- readRDS(gsub('.rds',paste0('_rates_unknown_', i, '_', number_str,'.rds'),.args[7]))
+  dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_str,'.rds'),.args[7]))
   list_samples <- mclapply(1:3, get_samples_parallel)
   samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
   samples_out
 }
 
-number_str <- '0_10_40000'
-dat_example <- readRDS(gsub('.rds',paste0('_rates_unknown_1_', number_str,'.rds'),.args[7]))
-mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
+# load most recently run settings (burn in, thinning, samples)
+number_str_file <- readRDS(.args[7])
+number_str <- number_str_file$x[1]
 
-mcmc_samples[, c('LP','LPr') := NULL]
+# was it run on the HPC? files saved differently
+WAS_HPC <- !grepl('_NOT_HPC', number_str)
+number_str <- gsub('_NOT_HPC', '', number_str)
+
+if(WAS_HPC){
+  
+  dat_example <- readRDS(gsub('.rds',paste0('_1_', number_str,'.rds'),.args[7]))
+  mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
+  mcmc_samples[, c('LP','LPr') := NULL]
+  
+}else{
+  
+  mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_str,'.rds'),.args[7]))
+  mcmc_samples <- rbindlist(lapply(1:3, get_samples))
+  mcmc_samples[, c('Lposterior','Lprior') := NULL]
+  
+}
 
 fitted_pars <- unique(epid_pars$name)
 fitted_pars <- fitted_pars[fitted_pars %notin% c('epidemic', 'R0')]
 cat('\n',length(fitted_pars),' fitted parameters\n', sep = '')
 colnames(mcmc_samples) <- c(fitted_pars, 'llikelihood', 'chain', 'iteration', 'epidemic')
-# mcmc_samples[, init_infected := 10^init_infected]
 
 #### ADD R0 #### 
 cat('Adding R0: ')
@@ -219,8 +234,8 @@ for(i in 1:nrow(unique_df)){
 fitted_pars <- c(fitted_pars, 'R0')
 
 #### FILTER #### 
-burn_in <- 100000 #dat_example$burn_in
-thinning_value <- dat_example$thinning_value
+burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
+thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
 n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
 
 mcmc_samples_filtered <- mcmc_samples[iteration > burn_in & iteration %% thinning_value == 0,]
@@ -247,9 +262,14 @@ mcmc_samples_filtered %>%
   geom_point(aes(x = transmissibility, y = value, col = as.factor(epidemic), shape = name)) +
   theme_bw() + labs(col='Epidemic', shape='') + facet_grid(. ~ name)
 
-## pairwise plots
-# only taking 1% of the mcmc_samples_filtered dataset as it takes too long otherwise!
-pairs_data <- mcmc_samples_filtered[seq(1, nrow(mcmc_samples_filtered), by = 100), c(1:20, 24)]
+## PAIRWISE PLOTS
+pairs_data <- if(nrow(mcmc_samples_filtered) >= 10000){
+  # only taking 1% of the mcmc_samples_filtered dataset as it takes too long otherwise!
+  mcmc_samples_filtered[seq(1, nrow(mcmc_samples_filtered), by = 100), c(1:20, 24)]
+}else{
+  mcmc_samples_filtered[1:nrow(mcmc_samples_filtered), c(1:20, 24)]
+}
+
 colnames(pairs_data) <- gsub('_rate_','_rate\n_', colnames(pairs_data))
 colnames(pairs_data) <- gsub('_spline_','_spline\n_', colnames(pairs_data))
 p <- ggpairs(pairs_data, columns = 1:4, aes(color = as.factor(epidemic), alpha = 0.5))

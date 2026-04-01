@@ -1,6 +1,9 @@
 ## MCMC FUNCTIONS ##
 
-## WITH UNKNOWN REPORTING RATES ##
+TEXT_SAVE_DIR <- file.path('mcmc_output')
+if(!dir.exists(TEXT_SAVE_DIR)){dir.create(TEXT_SAVE_DIR)}
+
+## MCMC FITTING, WITH UNKNOWN REPORTING RATES ##
 run_mcmc_inference <- function(
     demography_input, 
     vaccinated_input,
@@ -241,7 +244,7 @@ run_mcmc_inference <- function(
     return(lprob)
   }
   
-  # Helper to get Beta parameters from mean and concentration
+  # get beta parameters from mean and concentration
   beta_pars <- function(mean, concentration) {
     c(a = mean * concentration, b = (1 - mean) * concentration)
   }
@@ -380,6 +383,8 @@ plot_trace <- function(var, filtered = F){
 }
 
 
+## OLD FITTING FUNCTION, WHERE REPORTING RATES WERE KNOWN ##
+#
 # run_mcmc_inference_old <- function(
 #     demography_input, 
 #     vaccinated_input,

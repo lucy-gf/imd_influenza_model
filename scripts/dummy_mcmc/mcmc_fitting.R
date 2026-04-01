@@ -117,9 +117,9 @@ if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')
 #### RUNNING MCMC ####
 
 nchains <- 3
-burn_in <- 3000
-thinning_value <- 5
-n_samples <- 2000
+burn_in <- 10
+thinning_value <- 2
+n_samples <- 10
 
 mcmc_parallel <- function(i){
   txt_output <<- i
@@ -147,17 +147,12 @@ mcmc_parallel <- function(i){
 
 mcmc_results <- mclapply(1:3, mcmc_parallel, mc.cores = 3)
 
-time <- Sys.time(); time <- gsub(' ', '_', time)
+#### SAVE RESULTS ####
 
-write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_', time, '.rds'),
-                             .args[5])) # in case next save fails
+# save most recently run settings as a dummy save
+write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples,'_NOT_HPC')), .args[5]) 
 
-mcmc_results <- c(mcmc_results,
-                  list(burn_in=burn_in, thinning_value=thinning_value, n_samples=n_samples))
-
-#### SAVE ####
-
-write_rds(data.table(x=1), .args[5]) # dummy save
-write_rds(mcmc_results, gsub('.rds',paste0('_',burn_in,'_',thinning_value,'_',n_samples,'_', time, '.rds'),
+# save actual data
+write_rds(mcmc_results, gsub('.rds',paste0('_', burn_in,'_',thinning_value,'_',n_samples,'.rds'),
                              .args[5]))
 

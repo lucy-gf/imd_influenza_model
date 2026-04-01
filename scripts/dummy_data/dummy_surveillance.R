@@ -59,15 +59,12 @@ for(k in 1:length(infections)){
   
   #### SAMPLE PRIMARY CARE ####
   
-  jitter_width <- 0 # 0.01 # no jitter for now
-  unif_jitter <- runif(nrow(infections_df), min = -jitter_width, max = jitter_width)
-  
   primary_care <- c()
   for(i in 1:nrow(infections_df)){
     if(infections_df$observed_infections[i] < 1){
       primary_care <- c(primary_care, 0)
     }else{
-      prob_i <- (infections_df$gp_rate[i] + unif_jitter[i])
+      prob_i <- (infections_df$gp_rate[i])
       if(prob_i <= 0){prob_i <- 1e-10}
       prc_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
                       prob = prob_i)
@@ -79,15 +76,12 @@ for(k in 1:length(infections)){
   
   #### SAMPLE SECONDARY CARE ####
   
-  jitter_width <- 0 # 0.001 # no jitter for now
-  unif_jitter <- runif(nrow(infections_df), min = -jitter_width, max = jitter_width)
-  
   secondary_care <- c()
   for(i in 1:nrow(infections_df)){
     if(infections_df$observed_infections[i] < 1){
       secondary_care <- c(secondary_care, 0)
     }else{
-      prob_i <- (infections_df$hosp_rate[i] + unif_jitter[i])
+      prob_i <- (infections_df$hosp_rate[i])
       if(prob_i <= 0){prob_i <- 1e-10}
       sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
                       prob = prob_i)
