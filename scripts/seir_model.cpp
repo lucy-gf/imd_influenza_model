@@ -17,7 +17,7 @@ NumericMatrix run_seir_cpp(
 ) {
   int ng = pop.size();
   
-  // Rates — identical to odin (two E and two I stages)
+  // Rates (two E and two I stages)
   double lat_rate = 2.0 / lat_per;
   double inf_rate = 2.0 / inf_per;
   
@@ -71,7 +71,7 @@ NumericMatrix run_seir_cpp(
       progI2[i] = inf_rate * I2[i];
     }
     
-    // Euler update — identical to odin deriv() equations
+    // Euler update (identical to odin deriv() equations)
     for (int i = 0; i < ng; i++) {
       S[i]    += dt * (-newInf[i]);
       E1[i]   += dt * (newInf[i]  - progE1[i]);

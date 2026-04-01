@@ -22,7 +22,7 @@ run_model <- function(
     susc <- rep(susc, dim(cm)[1]/length(susc))
   }
   
-  ## OLD CODE FROM ODIN SEIR MODEL
+  ## OLD CODE FROM ODIN SEIR MODEL (AT BOTTOM OF SCRIPT) ##
   # model <- seeiir_risk_odin$new(
   #   no_groups = ndim,
   #   pop = pop,

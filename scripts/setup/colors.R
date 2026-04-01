@@ -1,3 +1,4 @@
+## FUNCTIONS, COLORS, VARIABLE NAMES, ETC. ##
 
 select <- dplyr::select
 wday <- lubridate::wday

@@ -15,7 +15,7 @@ options(dplyr.summarise.inform = FALSE)
 
 source(file.path('scripts','setup','colors.R'))
 
-## this should have an age group flag
+## load data
 
 lsoa_imd <- data.table(read_xlsx(.args[1], sheet = 2) %>% 
                          select(starts_with('LSOA'),starts_with('Overall'),starts_with('Index')))

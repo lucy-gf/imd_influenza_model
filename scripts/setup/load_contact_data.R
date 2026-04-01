@@ -13,8 +13,7 @@ options(dplyr.summarise.inform = FALSE)
 
 source(file.path('scripts','setup','colors.R'))
 
-## in reality this should be the nhs_ages (not base) matrix from objective 1, 
-## and should have a national/regional sensitivity analysis flag
+## in reality this should have a national/regional sensitivity analysis flag
 
 ## read
 cm <- read_csv(.args[1])

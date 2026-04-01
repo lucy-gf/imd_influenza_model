@@ -10,13 +10,11 @@ suppressMessages(require(BayesianTools))
 suppressMessages(require(parallel))
 options(dplyr.summarise.inform = FALSE) 
 
-.args <- #if (interactive()) c(
-  c(file.path("data", "inputs", "imd_age_pop.rds"),
-    file.path("data", "inputs", "contact_matrix.rds"),
-    file.path("data", "dummy_data", "dummy_surveillance.rds"),
-    file.path("data", "dummy_data", "known_parameters.rds"),
-    file.path("output", "data", "mcmc_samples_rates_unknown.rds")
-  ) #else commandArgs(trailingOnly = TRUE)
+.args <- c(file.path("data", "inputs", "imd_age_pop.rds"),
+           file.path("data", "inputs", "contact_matrix.rds"),
+           file.path("data", "dummy_data", "dummy_surveillance.rds"),
+           file.path("data", "dummy_data", "known_parameters.rds"),
+           file.path("output", "data", "mcmc_samples_rates_unknown.rds"))
 
 i <- as.numeric(commandArgs(trailingOnly = TRUE))
 
