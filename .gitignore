@@ -49,8 +49,9 @@ po/*~
 rsconnect/
 
 # repository folders
-/data
 /output
 Rplots.pdf
 /mcmc_output
 /bash
+/data/population
+/data/contact_matrix
