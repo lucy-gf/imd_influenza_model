@@ -5,6 +5,7 @@ suppressPackageStartupMessages(require(ggplot2))
 suppressPackageStartupMessages(require(tidyverse))
 suppressPackageStartupMessages(require(data.table))
 suppressPackageStartupMessages(require(readr))
+suppressPackageStartupMessages(require(patchwork))
 options(dplyr.summarise.inform = FALSE) 
 
 .args <- if (interactive()) c(
@@ -146,14 +147,14 @@ ratep1 <- care_rate_imd_df %>%
                 col = as.factor(imd_quintile)), lwd = 0.8) +
   theme_bw() + ylim(c(0,NA)) + facet_grid(name ~ risk_level, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors) +
-  labs(y='Rate', lty = 'care setting', col = 'IMD quintile'); ratep1
+  labs(y='Rate', col = 'IMD quintile'); ratep1
 
 ratep2 <- rel_imd_rep_rates %>% 
   pivot_longer(!imd_quintile) %>%
   ggplot() + 
   geom_line(aes(imd_quintile, value, group = name, lty = name), lwd = 0.8) +
   theme_bw() + ylim(c(0,NA)) +
-  labs(y='Relative rate (baseline = IMD 3)', lty = 'Care setting', col = 'IMD quintile'); ratep2
+  labs(y='Relative rate (baseline = IMD 3)', lty = 'Care setting'); ratep2
 
 ratep1 + ratep2 + plot_layout(nrow = 1, widths = c(2,1))
 ggsave(file.path('output','figures','dummy_mcmc','reporting_rates.png'), width = 16, height = 7)

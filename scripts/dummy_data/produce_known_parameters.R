@@ -12,6 +12,8 @@ options(dplyr.summarise.inform = FALSE)
   file.path("data", "dummy_data", "known_parameters.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
+if(!dir.exists(file.path("data", "dummy_data"))){dir.create(file.path("data", "dummy_data"))}
+
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
 age_labels <- unique(imd_age_pop_reg$age_grp) 
