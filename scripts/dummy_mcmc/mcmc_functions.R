@@ -182,10 +182,15 @@ run_mcmc_inference <- function(
         facet_grid(age_grp ~ imd_quintile, scales = 'free') # should be TRUE everywhere
       }
     
+    # Make log likelihood use max(infections, observations) to avoid -Inf where poss
+    # I.e. if(infections[i] < observations[i]){infections[i] <- observations[i]}
+    time_series_maxed <- pmax(time_series_shifted$infections,
+                              time_series_shifted$observations)
+    
     # Vectorised log likelihood
     total_ll <- sum(dbinom(
       x    = time_series_shifted$observations,
-      size = time_series_shifted$infections,
+      size = time_series_maxed,
       prob = time_series_shifted$rate,
       log  = TRUE
     ), na.rm = TRUE)
