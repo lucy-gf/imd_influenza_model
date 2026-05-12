@@ -40,12 +40,12 @@ imd_age_pop <- imd_age_pop %>%
   arrange(imd_quintile, age_grp)
 
 ## read in contact matrix
-contact_matrix_1000 <- readRDS(.args[2])
+contact_matrix <- readRDS(.args[2])
 
-## aggregate
-contact_matrix <- contact_matrix_1000 %>% 
-  group_by(p_imd_q, c_imd_q, p_age_group, c_age_group) %>% 
-  summarise(n = mean(n))
+## check the right number of rows (no extra defining variables)
+if(nrow(contact_matrix) != nrow(contact_matrix %>% select(p_imd_q, c_imd_q, p_age_group, c_age_group) %>% unique())){
+  warning('Number of rows in contact matrix wrong')
+}
 
 contact_matrix$p_age_group <- factor(contact_matrix$p_age_group,
                                      levels = age_labels)

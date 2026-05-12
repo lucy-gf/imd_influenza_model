@@ -117,9 +117,9 @@ if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')
 #### RUNNING MCMC ####
 
 nchains <- 3
-burn_in <- 3000
-thinning_value <- 1
-n_samples <- 3000
+burn_in <- 20000
+thinning_value <- 5
+n_samples <- 30000
 
 mcmc_results <- run_mcmc_inference(
   demography_input = demography, 

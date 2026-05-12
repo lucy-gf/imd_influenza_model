@@ -169,5 +169,32 @@ surveillance_data %>%
   theme_bw() + labs(color='IMD') + facet_grid(risk_level ~ age_grp, scales = 'free') +
   scale_color_manual(values = imd_quintile_colors)
 
+sd_plot <- surveillance_data %>% 
+  left_join(vaccinated_pop %>% select(age_grp, imd_quintile, risk_level, pop),
+            by = c('age_grp','imd_quintile','risk_level')) %>% 
+  left_join(opensafely_coverage,
+            by = c('age_grp','imd_quintile','risk_level')) %>% 
+  mutate(pop = pop*OS_COVERAGE) %>% select(!OS_COVERAGE) %>% 
+  filter(index == 3) %>% 
+  mutate(age_grp = case_when(
+    age_grp %in% c('18-25','26-34','35-49','50-69') ~ '18-69',
+    T ~ age_grp)) %>% 
+  group_by(week_start, age_grp, imd_quintile) %>% 
+  summarise(secondary_care = sum(secondary_care), 
+            pop = sum(pop)) %>% 
+  mutate(secondary_care = 100000*secondary_care/pop)
+
+sd_plot$age_grp <- factor(sd_plot$age_grp,
+                          levels = c('0-4','5-11','12-17','18-69','70-79','80+'))
+sd_plot %>% 
+  ggplot() +
+  geom_line(aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
+  geom_point(data = sd_plot %>% filter(secondary_care > 0),
+             aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),
+             alpha = 1) +
+  theme_bw() + labs(color='IMD') + facet_wrap(. ~ age_grp, scales = 'free') +
+  scale_color_manual(values = imd_quintile_colors) +
+  labs(y = 'Hospital attendance per 100,000', x='')
+
 write_rds(surveillance_data, .args[4])
 

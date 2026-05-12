@@ -122,18 +122,19 @@ run_mcmc_inference <- function(
     
     if(any(is.na(time_series))) return(-Inf)
     
-    # Take rounded value of OBSERVED infections (need an integer)
+    # Calculate value of OBSERVED infections 
     time_series <- time_series[coverage_rates, on = c('age_grp','imd_quintile','risk_level')]
-    time_series_fit <- time_series[, .(infections = floor(sum(OS_COVERAGE*infections))),
+    time_series_fit <- time_series[, .(infections = sum(OS_COVERAGE*infections)),
                                    by = .(date, age_grp, imd_quintile, risk_level)]
     time_series_fit[, imd_quintile := as.numeric(imd_quintile)]
     
     if(any(is.na(time_series_fit))) return(-Inf)
     
-    # Check epidemic is growing at start, and not at the end
     setorder(time_series_fit, age_grp, imd_quintile, risk_level)
-    if(time_series_fit$infections[1] > time_series_fit$infections[5]) return(-Inf)
-    if(time_series_fit$infections[nrow(time_series_fit)] > time_series_fit$infections[nrow(time_series_fit)-5]) return(-Inf)
+    
+    # REMOVED - Check epidemic is growing at start, and not at the end
+    # if(time_series_fit$infections[1] > time_series_fit$infections[5]) return(-Inf)
+    # if(time_series_fit$infections[nrow(time_series_fit)] > time_series_fit$infections[nrow(time_series_fit)-5]) return(-Inf)
     
     # Aggregate to weekly and join with surveillance data
     time_series_fit[, week_start := last_monday(date)]
@@ -173,7 +174,7 @@ run_mcmc_inference <- function(
       time_series_shifted %>% ## plot {observations} against {infections x reporting rates}
         ggplot() + theme_bw() +
         geom_line(aes(week_start,rate*infections, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
-        geom_line(aes(week_start,observations, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
+        geom_point(aes(week_start,observations, shape=risk_level, col=setting, group=interaction(setting, risk_level)), alpha = 0.4) +
         facet_grid(age_grp ~ imd_quintile, scales = 'free')
       time_series_shifted %>%
         ggplot() + theme_bw() +
@@ -182,16 +183,16 @@ run_mcmc_inference <- function(
         facet_grid(age_grp ~ imd_quintile, scales = 'free') # should be TRUE everywhere
       }
     
+    # OLD (FOR BINOMIAL LLIKELIHOOD):
     # Make log likelihood use max(infections, observations) to avoid -Inf where poss
     # I.e. if(infections[i] < observations[i]){infections[i] <- observations[i]}
-    time_series_maxed <- pmax(time_series_shifted$infections,
-                              time_series_shifted$observations)
+    # time_series_maxed <- pmax(time_series_shifted$infections,
+    #                           time_series_shifted$observations)
     
     # Vectorised log likelihood
-    total_ll <- sum(dbinom(
+    total_ll <- sum(dpois(
       x    = time_series_shifted$observations,
-      size = time_series_maxed,
-      prob = time_series_shifted$rate,
+      lambda = time_series_shifted$infections*time_series_shifted$rate,
       log  = TRUE
     ), na.rm = TRUE)
     
@@ -225,11 +226,9 @@ run_mcmc_inference <- function(
     
     if(R0 < min_r0 || R0 > max_r0) { return(-Inf) }
     
-    # Scaled Beta prior on R0
-    r0_scaled <- (R0 - min_r0) / (max_r0 - min_r0)  # rescale to [0,1]
-    lprob <- lprob + dbeta(r0_scaled,
-                           shape1 = r0_beta['a'],
-                           shape2 = r0_beta['b'], log = TRUE)
+    # Scaled normal prior on R0 (pnorm(min_r0) is the log normalising constant)
+    lprob <- lprob + dnorm(R0, mean = r0_mean, sd = r0_sd, log = TRUE) -
+      pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
     # Uniform prior on transmissibility 
     lprob <- lprob + dunif(unname(pars[1]), min = min_trans, max = max_trans, log = TRUE)
     # Uniform prior on susceptibility, x2
@@ -257,13 +256,14 @@ run_mcmc_inference <- function(
   # Primary care: centred at 0.02, secondary: centred at 0.005
   prim_beta  <- beta_pars(0.02, 200) 
   sec_beta   <- beta_pars(0.005, 200)
-  # R0 centred at 2 (scaled mean = 0.5)
-  r0_beta <- beta_pars(0.5, 10)  # a=5, b=5
+  # R0 centred at 2 
+  r0_mean <- 2
+  r0_sd   <- 0.4
   
   ## set bounds
   min_trans <- 0; max_trans <- 1
   min_susc <- 0; max_susc <- 5
-  min_r0 <- 1; max_r0 <- 3
+  min_r0 <- 1; max_r0 <- 4
   min_log_init_inf <- 0; max_log_init_inf <- log10(min(demography_input$population))
   min_reporting <- 0; max_reporting <- 1
   min_spline <- -log(5); max_spline <- log(5) # equivalent to IMD ratios at most 
@@ -281,8 +281,10 @@ run_mcmc_inference <- function(
     for(j in 1:n){
       valid <- FALSE
       while(!valid){
-        r0_scaled <- rbeta(1, shape1 = r0_beta['a'], shape2 = r0_beta['b'])
-        R0 <- min_r0 + r0_scaled * (max_r0 - min_r0)
+        repeat {
+          R0 <- rnorm(1, mean = r0_mean, sd = r0_sd)
+          if (R0 >= min_r0 && R0 <= max_r0) break
+        }
         
         susc_1 <- runif(1, min_susc, max_susc)
         susc_2 <- runif(1, min_susc, max_susc)
@@ -371,14 +373,14 @@ plot_trace <- function(var, filtered = F){
     pivot_longer(!c(iteration,epidemic,chain)) %>%
     filter(name == var) %>%
     ggplot() +
-    geom_line(aes(x = iteration, y = value, col = as.factor(chain), group = chain)) +
+    geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain)) +
     geom_hline(data = epid_pars %>% mutate(epidemic = paste0("Epidemic ", epidemic)) %>% filter(name==var),
                aes(yintercept = value), lty=2) +
     # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
     facet_grid(.~epidemic) +
     theme_bw() + labs(y = Y_LAB) +
     # scale_color_manual(values = var_cols) +
-    theme(legend.position = 'none')
+    theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
   
   if(var=='init_infected'){
     p <- p + scale_y_log10()

@@ -106,8 +106,8 @@ epid_parameters_s3 <- list(
 
 # TODO for now these are the same in each season
 
-gp_rate <- c(1, 0.1, 2, 5, 3, 6)/50
-hosp_rate <- c(2, 0.1, 2, 8, 3, 15)/500
+gp_rate <- c(1, 0.1, 2, 5, 3, 6)/20
+hosp_rate <- c(2, 0.1, 2, 8, 3, 15)/100
 ## LOW RISK CHILDREN, ADULTS, OLDER ADULTS, 
 ## HIGH RISK CHILDREN, ADULTS, OLDER ADULTS
 
@@ -124,8 +124,8 @@ care_rate_age_df <- data.table(cross_join(
 care_rate_age_df[, c('broad_age.x','broad_age.y') := NULL]
 
 imd_spline_pars <- data.table(
-  primary = c(-0.8, 0.7),
-  secondary = c(-0.3, 0.2)
+  primary = c(-0.1, 0.12),
+  secondary = c(-0.07, 0.05)
 )
 rel_imd_rep_rates <- data.frame(imd_quintile = 1:5,
                                 rel_primary_rates = imd_spline(imd_spline_pars$primary),
@@ -153,11 +153,19 @@ ratep2 <- rel_imd_rep_rates %>%
   pivot_longer(!imd_quintile) %>%
   ggplot() + 
   geom_line(aes(imd_quintile, value, group = name, lty = name), lwd = 0.8) +
-  theme_bw() + ylim(c(0,NA)) +
-  labs(y='Relative rate (baseline = IMD 3)', lty = 'Care setting'); ratep2
+  geom_point(aes(imd_quintile, value, group = name), 
+             color = 'white', size = 3) +
+  geom_point(aes(imd_quintile, value, group = name), 
+             shape = 1, stroke = 2, size = 3) +
+  theme_bw() + ylim(c(0.8,1.2)) +
+  scale_linetype_manual(labels = c("Primary care", "Secondary care"),
+                        values = c(1,2)) +
+  theme(text = element_text(size = 12)) +
+  labs(y='Relative rate (baseline = IMD 3)', lty = 'Care setting',
+       x = 'IMD quintile'); ratep2
 
 ratep1 + ratep2 + plot_layout(nrow = 1, widths = c(2,1))
-ggsave(file.path('output','figures','dummy_mcmc','reporting_rates.png'), width = 16, height = 7)
+ggsave(file.path('output','figures','dummy_infections','reporting_rates.png'), width = 16, height = 7)
 
 #### MAKE INTO LIST ####
 
