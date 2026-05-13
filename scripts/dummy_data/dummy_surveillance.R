@@ -54,7 +54,7 @@ for(k in 1:length(infections)){
     mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
     left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile', 'risk_level')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
-    mutate(observed_infections = floor(OS_COVERAGE*infections)) 
+    mutate(observed_infections = round(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population
   
   #### SAMPLE PRIMARY CARE ####
