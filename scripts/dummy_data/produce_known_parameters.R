@@ -1,0 +1,205 @@
+## KNOWN PARAMETERS ##
+
+#### SETUP ####
+suppressMessages(require(ggplot2))
+suppressMessages(require(tidyverse))
+suppressMessages(require(data.table))
+suppressMessages(require(readr))
+options(dplyr.summarise.inform = FALSE) 
+
+.args <- if (interactive()) c(
+  file.path("data", "inputs", "imd_age_pop.rds"),
+  file.path("data", "dummy_data", "known_parameters.rds")
+) else commandArgs(trailingOnly = TRUE)
+
+if(!dir.exists(file.path("data", "dummy_data"))){dir.create(file.path("data", "dummy_data"))}
+
+source(file.path('scripts','setup','colors.R'))
+
+## read in population data
+imd_age_pop_reg <- readRDS(.args[1])
+age_labels <- unique(imd_age_pop_reg$age_grp) 
+nage <- n_distinct(imd_age_pop_reg$age_grp)
+nimd <- n_distinct(imd_age_pop_reg$imd_quintile)
+
+## aggregate
+imd_age_pop <- imd_age_pop_reg %>% 
+  group_by(age_grp, imd_quintile) %>% 
+  summarise(pop = sum(pop))
+
+imd_age_pop$age_grp <- factor(imd_age_pop$age_grp, levels = age_labels) 
+
+imd_age_pop <- imd_age_pop %>% 
+  arrange(imd_quintile, age_grp)
+
+#### MAKE PARAMETERS ####
+
+## number of years of data
+years <- 2023:2025 # 2023-24 to 2025-26
+
+#### PROPORTIONS IN RISK GROUPS ####
+
+## risk group proportions
+
+risk_group_kids <- 0.12
+risk_group_adults <- 0.08
+risk_group_elderly <- 0.4
+
+risk_group_age_vector <- c(
+  rep(risk_group_kids, 3),
+  rep(risk_group_adults, 4),
+  rep(risk_group_elderly, 2)
+)
+
+## add some variation by IMD
+rgiv_vec <- c(0.15, 0.25, 0.08) # children, adults, older adults
+risk_group_imd_variation <- c(
+  rep(risk_group_kids*seq(1 + 2*rgiv_vec[1], 1 - 2*rgiv_vec[1], by = -rgiv_vec[1]), 3),
+  rep(risk_group_adults*seq(1 + 2*rgiv_vec[2], 1 - 2*rgiv_vec[2], by = -rgiv_vec[2]), 4),
+  rep(risk_group_elderly*seq(1 + 2*rgiv_vec[3], 1 - 2*rgiv_vec[3], by = -rgiv_vec[3]), 2)
+)
+
+risk_group_pop <- data.frame(risk_proportion = risk_group_imd_variation) %>% 
+  mutate(age_grp = rep(age_labels, each = nimd),
+         imd_quintile = rep(1:nimd, nage)) %>% 
+  left_join(imd_age_pop, by = c('age_grp','imd_quintile')) %>% 
+  mutate(risk_population = round(risk_proportion*pop)) %>% 
+  arrange(imd_quintile, age_grp)
+
+risk_group_pop %>% 
+  ggplot() + geom_line(aes(age_grp, risk_population, col=imd_quintile,
+                           group=imd_quintile))
+
+risk_group_pop %>% 
+  ggplot() + geom_line(aes(age_grp, risk_proportion, col=imd_quintile,
+                           group=imd_quintile)) 
+
+## VACCINATION COVERAGE
+
+vaccination_coverage_kids <- 0.5
+vaccination_coverage_elderly <- 0.7
+vaccination_coverage_risk <- 0.5
+
+vaccination_coverage_age_vector <- c(
+  rep(vaccination_coverage_kids, 3),
+  rep(vaccination_coverage_risk, 4),
+  rep(vaccination_coverage_elderly, 2)
+)
+
+## add some variation by IMD
+vaccination_imd_variation <- seq(0.9, 1.1, by = 0.05)
+
+vaccinated_pop_1 <- data.table(vcav = rep(vaccination_coverage_age_vector, nimd), 
+                               vciv = rep(vaccination_imd_variation, each = nage)) %>% 
+  mutate(age_grp = rep(age_labels, nimd),
+         imd_quintile = rep(1:nimd, each = nage),
+         vaccinated_proportion = vcav*vciv) %>% 
+  left_join(risk_group_pop, by = c('age_grp','imd_quintile')) 
+
+# split by risk groups
+vaccinated_pop <- rbind(vaccinated_pop_1 %>% mutate(risk_level = 'low', pop = pop - risk_population),
+                        vaccinated_pop_1 %>% mutate(risk_level = 'high', pop = risk_population)) %>% 
+  select(!c(risk_population, vcav, vciv))
+
+vaccinated_pop <- vaccinated_pop %>% 
+  mutate(vaccinated_population = case_when(
+    age_grp %in% c('18-25', '26-34', '35-49', '50-69') & risk_level == 'low' ~ 0,
+    T ~ round(vaccinated_proportion*pop)
+  )) %>% 
+  ## ENSURE ALL POP ORDERS ARE IMD THEN AGE
+  arrange(desc(risk_level), imd_quintile, age_grp)
+
+vaccinated_pop %>% group_by(age_grp,imd_quintile) %>% 
+  summarise(vaccinated_population=sum(vaccinated_population)) %>% 
+  ggplot() + geom_line(aes(age_grp, vaccinated_population, col=imd_quintile,
+                           group=imd_quintile))
+
+vaccinated_pop %>% 
+  ggplot() + geom_line(aes(age_grp, vaccinated_population, col=imd_quintile,
+                           lty = risk_level, group=interaction(imd_quintile,risk_level)))
+
+vaccinated_pop %>% 
+  ggplot() + geom_line(aes(age_grp, vaccinated_population/pop, col=imd_quintile,
+                           lty = risk_level, group=interaction(imd_quintile,risk_level)))
+
+vaccinated_pop %>% 
+  mutate(key_group = case_when(
+    age_grp %in% c('0-4','5-11','12-17') ~ 'Children',
+    age_grp %notin% c('0-4','5-11','12-17','70-79','80+') & risk_level == 'high' ~ 'Risk group (18-69)',
+    age_grp %in% c('70-79','80+') ~ 'Older adults',
+    T~ NA
+  )) %>% 
+  group_by(key_group, imd_quintile) %>% 
+  summarise(vaccinated_population = sum(vaccinated_population),
+            pop = sum(pop)) %>% filter(!is.na(key_group)) %>% 
+  ggplot() + 
+  geom_bar(aes(x = key_group, group = imd_quintile, 
+               fill = as.factor(imd_quintile), y = 100*vaccinated_population/pop),
+           stat = 'identity', position = 'dodge') +
+  scale_fill_manual(values = imd_quintile_colors) + 
+  theme_bw() + labs(x = '', fill = 'IMD quintile', 
+                    y = 'Simulated vaccine uptake (%)') +
+  theme(text = element_text(size = 12))
+
+vaccinated_pop %>% 
+  ggplot() + 
+  geom_line(aes(x = age_grp, group = as.factor(imd_quintile), 
+               col = as.factor(imd_quintile), y = risk_proportion), lwd = 1) +
+  geom_point(aes(x = age_grp, group = as.factor(imd_quintile), 
+                 col = as.factor(imd_quintile), y = risk_proportion), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, group = as.factor(imd_quintile), 
+                col = as.factor(imd_quintile), y = risk_proportion), 
+             shape = 1, stroke=2, size = 3) +
+  scale_color_manual(values = imd_quintile_colors) + ylim(c(0,0.5)) +
+  theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
+                    y = 'Simulated percentage in clinical risk group') +
+  theme(text = element_text(size = 14))
+
+#### EPI PERIODS ####
+
+epid_periods <- c(2, 3) # latent and infectious periods
+
+#### VACCINE EFFICACY ####
+## (age-dependent)
+VE_pars <- c(0.70, 0.46) # currently just using the NGIV VE estimates with no mismatching
+
+vaccination_efficacy <- data.table(
+  age_grp = age_labels,    
+  VE = c(rep(VE_pars[1], 7), rep(VE_pars[2], 2))
+)
+
+#### DELAYS ####
+
+primary_care_delay <- 1
+secondary_care_delay <- 2
+
+#### OPENSAFELY COVERAGE ####
+
+## for now assuming that this is 42% everywhere,
+## but in real-world model this will vary across subgroups
+
+proportion_observed <- CJ(
+  age_grp = age_labels,
+  imd_quintile = 1:5,
+  risk_level = c('high','low'),
+  OS_COVERAGE = 0.42
+) 
+
+#### MAKE INTO LIST ####
+
+known_pars <- list(
+  years = years,
+  risk_group_pop = risk_group_pop,
+  vaccinated_pop = vaccinated_pop,
+  epid_periods = epid_periods,
+  vaccination_efficacy = vaccination_efficacy,
+  primary_care_delay = primary_care_delay,
+  secondary_care_delay = secondary_care_delay,
+  proportion_observed = proportion_observed
+)
+
+#### SAVE KNOWN PARAMETERS ####
+
+saveRDS(known_pars, .args[2])
+

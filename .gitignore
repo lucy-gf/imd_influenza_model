@@ -47,3 +47,12 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# repository folders
+/output
+Rplots.pdf
+/mcmc_output
+/bash
+/data/population
+/data/contact_matrix
+/data/dummy_data
