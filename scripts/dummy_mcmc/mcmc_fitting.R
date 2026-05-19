@@ -150,9 +150,11 @@ mcmc_results <- mclapply(1:3, mcmc_parallel, mc.cores = 3)
 #### SAVE RESULTS ####
 
 # save most recently run settings as a dummy save
-write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples,'_NOT_HPC')), .args[5]) 
+write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
+                     HPC = F,
+                     date = Sys.Date()), .args[5]) 
 
 # save actual data
-write_rds(mcmc_results, gsub('.rds',paste0('_', burn_in,'_',thinning_value,'_',n_samples,'.rds'),
+write_rds(mcmc_results, gsub('.rds',paste0('_', burn_in,'_',thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
                              .args[5]))
 

@@ -187,23 +187,25 @@ read_and_get_samples <- function(i){
 }
 
 # load most recently run settings (burn in, thinning, samples)
-number_str_file <- readRDS(.args[7])
-number_str <- number_str_file$x[1]
+output_details_file <- readRDS(.args[7])
+number_str <- output_details_file$x[1]
+run_date <- output_details_file$date
+cat('\n------------\n',run_date,'\n------------\n',sep='')
 cat('\n------------\n',number_str,'\n------------\n',sep='')
+number_date_str <- paste0(number_str, '_', date)
 
-# was it run on the HPC? files saved differently
-WAS_HPC <- !grepl('_NOT_HPC', number_str)
-number_str <- gsub('_NOT_HPC', '', number_str)
+# was it run on the HPC? The files saved differently
+WAS_HPC <- output_details_file$HPC
 
 if(WAS_HPC){
   
-  dat_example <- readRDS(gsub('.rds',paste0('_1_', number_str,'.rds'),.args[7]))
+  dat_example <- readRDS(gsub('.rds',paste0('_1_', number_date_str,'.rds'),.args[7]))
   mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
   mcmc_samples[, c('LP','LPr') := NULL]
   
 }else{
   
-  mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_str,'.rds'),.args[7]))
+  mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_date_str,'.rds'),.args[7]))
   mcmc_samples <- rbindlist(lapply(1:3, get_samples))
   mcmc_samples[, c('Lposterior','Lprior') := NULL]
   
@@ -236,8 +238,8 @@ for(i in 1:nrow(unique_df)){
 fitted_pars <- c(fitted_pars, 'R0')
 
 #### FILTER #### 
-burn_in <- 80000 # as.numeric(strsplit(number_str, split = '_')[[1]][1])
-thinning_value <- 5 # as.numeric(strsplit(number_str, split = '_')[[1]][2])
+burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
+thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
 n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
 
 mcmc_samples_filtered <- mcmc_samples[iteration > burn_in & iteration %% thinning_value == 0,]

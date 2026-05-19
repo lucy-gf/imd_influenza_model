@@ -117,7 +117,7 @@ if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')
 #### RUNNING MCMC ####
 
 nchains <- 3
-burn_in <- 20000
+burn_in <- 80000
 thinning_value <- 5
 n_samples <- 30000
 
@@ -146,10 +146,12 @@ mcmc_results <- run_mcmc_inference(
 #### SAVE ####
 
 # save most recently run settings as a dummy save
-write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples)), .args[5]) 
+write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
+                     HPC = T,
+                     date = Sys.Date()), .args[5]) 
 
 # save actual data
-write_rds(mcmc_results, gsub('.rds',paste0('_', i, '_', burn_in,'_',thinning_value,'_',n_samples,'.rds'),
+write_rds(mcmc_results, gsub('.rds',paste0('_', i, '_', burn_in,'_',thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
                              .args[5]))
 
 
