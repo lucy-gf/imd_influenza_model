@@ -9,6 +9,7 @@ options(dplyr.summarise.inform = FALSE)
 
 .args <- if (interactive()) c(
   file.path("data", "inputs", "imd_age_pop.rds"),
+  file.path("data", "population", "risk_group_population_data.rds"),
   file.path("data", "dummy_data", "known_parameters.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
@@ -41,23 +42,65 @@ years <- 2023:2025 # 2023-24 to 2025-26
 
 ## risk group proportions
 
-risk_group_kids <- 0.12
-risk_group_adults <- 0.08
-risk_group_elderly <- 0.4
+USING_TRUE_RISK_DAT <- T
 
-risk_group_age_vector <- c(
-  rep(risk_group_kids, 3),
-  rep(risk_group_adults, 4),
-  rep(risk_group_elderly, 2)
-)
-
-## add some variation by IMD
-rgiv_vec <- c(0.15, 0.25, 0.08) # children, adults, older adults
-risk_group_imd_variation <- c(
-  rep(risk_group_kids*seq(1 + 2*rgiv_vec[1], 1 - 2*rgiv_vec[1], by = -rgiv_vec[1]), 3),
-  rep(risk_group_adults*seq(1 + 2*rgiv_vec[2], 1 - 2*rgiv_vec[2], by = -rgiv_vec[2]), 4),
-  rep(risk_group_elderly*seq(1 + 2*rgiv_vec[3], 1 - 2*rgiv_vec[3], by = -rgiv_vec[3]), 2)
-)
+if(USING_TRUE_RISK_DAT){
+  
+  ## loading in true risk group data
+  risk_group_dat <- readRDS(.args[2]) %>% 
+    mutate(.by = interval,
+           proportion = count/sum(count)) %>% 
+    filter(risk_group %like% 'high') %>% arrange(lower)
+  
+  ## matching up age groups via midpoint
+  age_labels_midpoints_list <- (str_split(gsub('[+]','-100',age_labels), pattern = '-'))
+  age_labels_midpoints <- c(); corresponding_intervals <- c(); risk_group_age_vector <- c()
+  for(interval in 1:nage){
+    age_labels_midpoints[interval] <- mean(as.numeric(age_labels_midpoints_list[[interval]]))
+    corresponding_intervals[interval] <- sum(age_labels_midpoints[interval] > risk_group_dat$lower)
+    risk_group_age_vector[interval] <- risk_group_dat$proportion[corresponding_intervals[interval]]
+  }
+  
+  ## add some variation by IMD
+  rgiv_vec <- c(0.15, 0.25, 0.08) # children, adults, older adults
+  risk_group_imd_variation_multipliers <- c(
+    rep(seq(1 + 2*rgiv_vec[1], 1 - 2*rgiv_vec[1], by = -rgiv_vec[1]), 3),
+    rep(seq(1 + 2*rgiv_vec[2], 1 - 2*rgiv_vec[2], by = -rgiv_vec[2]), 4),
+    rep(seq(1 + 2*rgiv_vec[3], 1 - 2*rgiv_vec[3], by = -rgiv_vec[3]), 2)
+  )
+  
+  risk_group_imd_variation <- c()
+  for(age in 1:nage){
+    for(imd in 1:nimd){
+      risk_group_imd_variation[imd + nimd*(age - 1)] <- 
+        risk_group_imd_variation_multipliers[imd + nimd*(age - 1)]*
+        risk_group_age_vector[age]
+      # cat(imd, ' ', age, ' ', imd + nimd*(age - 1),'\n')
+    }
+  }
+  
+}else{
+  
+  ## dummy data
+  risk_group_kids <- 0.12
+  risk_group_adults <- 0.08
+  risk_group_elderly <- 0.4
+  
+  risk_group_age_vector <- c(
+    rep(risk_group_kids, 3),
+    rep(risk_group_adults, 4),
+    rep(risk_group_elderly, 2)
+  )
+  
+  ## add some variation by IMD
+  rgiv_vec <- c(0.15, 0.25, 0.08) # children, adults, older adults
+  risk_group_imd_variation <- c(
+    rep(risk_group_kids*seq(1 + 2*rgiv_vec[1], 1 - 2*rgiv_vec[1], by = -rgiv_vec[1]), 3),
+    rep(risk_group_adults*seq(1 + 2*rgiv_vec[2], 1 - 2*rgiv_vec[2], by = -rgiv_vec[2]), 4),
+    rep(risk_group_elderly*seq(1 + 2*rgiv_vec[3], 1 - 2*rgiv_vec[3], by = -rgiv_vec[3]), 2)
+  )
+  
+}
 
 risk_group_pop <- data.frame(risk_proportion = risk_group_imd_variation) %>% 
   mutate(age_grp = rep(age_labels, each = nimd),
@@ -76,9 +119,11 @@ risk_group_pop %>%
 
 ## VACCINATION COVERAGE
 
-vaccination_coverage_kids <- 0.5
-vaccination_coverage_elderly <- 0.7
-vaccination_coverage_risk <- 0.5
+# https://www.gov.uk/government/statistics/seasonal-influenza-vaccine-uptake-in-children-of-school-age-monthly-data-2025-to-2026
+vaccination_coverage_kids <- 0.55
+# https://www.gov.uk/government/statistics/seasonal-influenza-vaccine-uptake-in-gp-patients-monthly-data-2025-to-2026
+vaccination_coverage_elderly <- 0.75
+vaccination_coverage_risk <- 0.4
 
 vaccination_coverage_age_vector <- c(
   rep(vaccination_coverage_kids, 3),
@@ -201,5 +246,5 @@ known_pars <- list(
 
 #### SAVE KNOWN PARAMETERS ####
 
-saveRDS(known_pars, .args[2])
+saveRDS(known_pars, .args[3])
 

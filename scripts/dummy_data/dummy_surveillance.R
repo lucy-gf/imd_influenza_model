@@ -135,7 +135,6 @@ full_df_agg %>% mutate(date = last_monday(date)) %>%
   theme_bw() + labs(color='IMD') + facet_grid(name ~ imd_quintile, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y"))
-ggsave(gsub('data','output/figures',gsub('.rds','.png',gsub('dummy_data','dummy_infections',.args[4]))), width = 16, height = 8)
 
 ## print outcomes
 
@@ -150,8 +149,7 @@ full_df_agg %>% group_by(index) %>%
 
 #### SAVE DATA ####
 
-# actual surveillance data won't include infections, 
-# and will only be weekly
+# actual surveillance data won't include infections, and will only be weekly
 surveillance_data <- full_df_agg %>% 
   group_by(age_grp, imd_quintile, risk_level) %>% 
   complete(date = seq.Date(from = as.Date(paste0('01-01-',year(full_df_agg$date[1])), format = '%d-%m-%Y') + 7,
@@ -176,16 +174,30 @@ sd_plot <- surveillance_data %>%
             by = c('age_grp','imd_quintile','risk_level')) %>% 
   mutate(pop = pop*OS_COVERAGE) %>% select(!OS_COVERAGE) %>% 
   filter(index == 3) %>% 
-  mutate(age_grp = case_when(
+  mutate(age_grp = case_when( ## aggregate adult cases
     age_grp %in% c('18-25','26-34','35-49','50-69') ~ '18-69',
     T ~ age_grp)) %>% 
   group_by(week_start, age_grp, imd_quintile) %>% 
-  summarise(secondary_care = sum(secondary_care), 
+  summarise(primary_care = sum(primary_care),
+            secondary_care = sum(secondary_care), 
             pop = sum(pop)) %>% 
-  mutate(secondary_care = 100000*secondary_care/pop)
+  mutate(primary_care = 100000*primary_care/pop,
+         secondary_care = 100000*secondary_care/pop)
 
 sd_plot$age_grp <- factor(sd_plot$age_grp,
                           levels = c('0-4','5-11','12-17','18-69','70-79','80+'))
+
+sd_plot %>% 
+  ggplot() +
+  geom_line(aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
+  geom_point(data = sd_plot %>% filter(primary_care > 0),
+             aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile),
+             alpha = 1) +
+  theme_bw() + labs(color='IMD') + facet_wrap(. ~ age_grp, scales = 'free') +
+  scale_color_manual(values = imd_quintile_colors) +
+  labs(y = 'Primary care attendance per 100,000', x='')
+ggsave(file.path('output/figures/dummy_infections/dummy_primary_care.png'), width = 16, height = 8)
+
 sd_plot %>% 
   ggplot() +
   geom_line(aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
@@ -195,6 +207,7 @@ sd_plot %>%
   theme_bw() + labs(color='IMD') + facet_wrap(. ~ age_grp, scales = 'free') +
   scale_color_manual(values = imd_quintile_colors) +
   labs(y = 'Hospital attendance per 100,000', x='')
+ggsave(file.path('output/figures/dummy_infections/dummy_secondary_care.png'), width = 16, height = 8)
 
 write_rds(surveillance_data, .args[4])
 
