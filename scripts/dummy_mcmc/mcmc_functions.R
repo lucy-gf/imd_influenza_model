@@ -252,6 +252,7 @@ run_mcmc_inference <- function(
   beta_pars <- function(mean, concentration) {
     c(a = mean * concentration, b = (1 - mean) * concentration)
   }
+  # TODO Should these be lognormal instead?
   
   # Primary care: centred at 0.02, secondary: centred at 0.005
   prim_beta  <- beta_pars(0.02, 200) 

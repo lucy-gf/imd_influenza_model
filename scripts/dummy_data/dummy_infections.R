@@ -71,13 +71,6 @@ years <- known_pars$years
 
 risk_group_pop <- known_pars$risk_group_pop
 vaccinated_pop <- known_pars$vaccinated_pop
- 
-v_p <- vaccinated_pop %>% group_by(age_grp, imd_quintile) %>% 
-  summarise(vaccinated_population = sum(vaccinated_population), pop = sum(pop)) %>% 
-  mutate(v_p = vaccinated_population/pop) %>% 
-  arrange(imd_quintile, age_grp) %>% 
-  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
-  mutate(eff_v_p = VE*v_p) ## effectively vaccinated individuals
 
 ## UNKNOWN PARAMETERS
 unknown_pars <- readRDS(.args[4])
@@ -94,6 +87,13 @@ for(i in 1:length(years)){
 ## check Reff
 cat('\n')
 for(i in 1:length(years)){
+  v_p <- vaccinated_pop %>% group_by(age_grp, imd_quintile) %>% 
+    summarise(vaccinated_population = sum(vaccinated_population), pop = sum(pop)) %>% 
+    mutate(v_p = vaccinated_population/pop) %>% 
+    arrange(imd_quintile, age_grp) %>% 
+    left_join(known_pars$vaccination_efficacy_infection[start_of_season==years[i]], by = 'age_grp') %>% 
+    mutate(eff_v_p = VE_INF*v_p) ## effectively vaccinated individuals
+  
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
   cat('Reff = ', R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
                        pars$infectious_period,
@@ -119,25 +119,26 @@ ng <- nrow(per_cap_matrix_45)
 ndim <- nrow(pc_cm)
 if(!all.equal(2*ng, ndim)){warning('dimensions not adding up')}
 
-#### SET MORE SEIR INPUTS ####
-
-# population sizes
-pop_stratified <- c(risk_group_pop$pop - risk_group_pop$risk_population,
-                    risk_group_pop$risk_population)
-
-vaccinated_pop <- vaccinated_pop %>% 
-  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
-  mutate(effectively_vaccinated_population = VE*vaccinated_population)
-pop_vaccinated <- c(vaccinated_pop$effectively_vaccinated_population)
-
-tot_pop <- sum(imd_age_pop$pop)
-if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
-
 #### RUN EACH SEASON ####
 
 seasonal_seir_outputs <- list()
 
 for(i in 1:length(years)){
+  
+  # population sizes (done here as may become season-specific)
+  pop_stratified <- c(risk_group_pop$pop - risk_group_pop$risk_population,
+                      risk_group_pop$risk_population)
+  
+  # add vaccination coverage (VE is season-specific)
+  vaccinated_pop_seasonal <- vaccinated_pop %>% 
+    left_join(known_pars$vaccination_efficacy_infection[start_of_season == years[i]], 
+              by = 'age_grp') %>% 
+    mutate(effectively_vaccinated_population = VE_INF*vaccinated_population)
+  
+  pop_vaccinated <- c(vaccinated_pop_seasonal$effectively_vaccinated_population)
+  
+  tot_pop <- sum(imd_age_pop$pop)
+  if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
   
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
   
@@ -156,7 +157,7 @@ for(i in 1:length(years)){
     inf_per = pars$infectious_period
     ) 
     
-  time_series <- time_series[vaccinated_pop %>% mutate(imd_quintile=as.character(imd_quintile)) %>% 
+  time_series <- time_series[vaccinated_pop_seasonal %>% mutate(imd_quintile=as.character(imd_quintile)) %>% 
                                select(age_grp, imd_quintile, risk_level, pop),
                              on = c('age_grp','imd_quintile','risk_level')]
   

@@ -55,7 +55,7 @@ all_inputs: ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/imd_age_pop.rds
 
 ##### PARAMETERS ###################################################################
 
-${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds
+${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds ${POPDIR}/risk_group_population_data.rds
 	$(call R)
 
 ${DUMMYDAT}/unknown_parameters.rds: ${DUMMYDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds

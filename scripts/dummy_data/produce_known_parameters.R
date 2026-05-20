@@ -117,7 +117,7 @@ risk_group_pop %>%
   ggplot() + geom_line(aes(age_grp, risk_proportion, col=imd_quintile,
                            group=imd_quintile)) 
 
-## VACCINATION COVERAGE
+#### VACCINATION COVERAGE #### 
 
 # https://www.gov.uk/government/statistics/seasonal-influenza-vaccine-uptake-in-children-of-school-age-monthly-data-2025-to-2026
 vaccination_coverage_kids <- 0.55
@@ -196,9 +196,9 @@ vaccinated_pop %>%
   geom_point(aes(x = age_grp, group = as.factor(imd_quintile), 
                 col = as.factor(imd_quintile), y = risk_proportion), 
              shape = 1, stroke=2, size = 3) +
-  scale_color_manual(values = imd_quintile_colors) + ylim(c(0,0.5)) +
+  scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
   theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
-                    y = 'Simulated percentage in clinical risk group') +
+                    y = 'Simulatedercentage in clinical risk group') +
   theme(text = element_text(size = 14))
 
 #### EPI PERIODS ####
@@ -206,16 +206,62 @@ vaccinated_pop %>%
 epid_periods <- c(2, 3) # latent and infectious periods
 
 #### VACCINE EFFICACY ####
-## (age-dependent)
-VE_pars <- c(0.70, 0.46) # currently just using the NGIV VE estimates with no mismatching
+## (age-dependent, annual, eventually strain-specific)
+# TODO Make strain-specific
 
-vaccination_efficacy <- data.table(
+#### AGAINST INFECTION ####
+# 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
+# 2024/25: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#secondary-care-surveillance
+
+vaccination_efficacy_infection <- CJ(
   age_grp = age_labels,    
-  VE = c(rep(VE_pars[1], 7), rep(VE_pars[2], 2))
+  start_of_season = years,
+  VE_INF = 0
 )
 
-#### DELAYS ####
+children_ages <- c('0-4','5-11','12-17')
+adult_ages <- c('18-25','26-34','35-49','50-69')
+older_adult_ages <- c('70-79','80+')
 
+## FOR NOW USING MADE UP DATA
+## TODO UPDATE WHEN DATA AVAILABLE
+vaccination_efficacy_infection[
+  age_grp %in% children_ages, VE_INF := 0.45][
+    age_grp %in% adult_ages, VE_INF := 0.35][
+      age_grp %in% older_adult_ages, VE_INF := 0.3]
+
+#### AGAINST HOSPITALISATION ####
+# 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
+# 2024/25: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#secondary-care-surveillance
+ 
+vaccination_efficacy_hospitalisation <- CJ(
+  age_grp = age_labels,    
+  start_of_season = years,
+  VE_HOSP = 0
+)
+
+children_ages <- c('0-4','5-11','12-17')
+adult_ages <- c('18-25','26-34','35-49','50-69')
+older_adult_ages <- c('70-79','80+')
+
+vaccination_efficacy_hospitalisation[
+  age_grp %in% children_ages & start_of_season == 2023, VE := 0.56][
+  age_grp %in% adult_ages & start_of_season == 2023, VE := 0.38][
+  age_grp %in% older_adult_ages & start_of_season == 2023, VE := 0.18]
+
+vaccination_efficacy_hospitalisation[
+  age_grp %in% children_ages & start_of_season == 2024, VE := 0.62][
+  age_grp %in% adult_ages & start_of_season == 2024, VE := 0.46][
+  age_grp %in% older_adult_ages & start_of_season == 2024, VE := 0.40]
+
+# for now, use 2024/25 values for 2025/26
+vaccination_efficacy_hospitalisation[
+  age_grp %in% children_ages & start_of_season == 2025, VE := 0.62][
+  age_grp %in% adult_ages & start_of_season == 2025, VE := 0.46][
+  age_grp %in% older_adult_ages & start_of_season == 2025, VE := 0.40]
+
+#### DELAYS ####
+## (in weeks)
 primary_care_delay <- 1
 secondary_care_delay <- 2
 
@@ -230,7 +276,7 @@ proportion_observed <- CJ(
   risk_level = c('high','low'),
   OS_COVERAGE = 0.42
 ) 
-
+ 
 #### MAKE INTO LIST ####
 
 known_pars <- list(
@@ -238,7 +284,8 @@ known_pars <- list(
   risk_group_pop = risk_group_pop,
   vaccinated_pop = vaccinated_pop,
   epid_periods = epid_periods,
-  vaccination_efficacy = vaccination_efficacy,
+  vaccination_efficacy_infection = vaccination_efficacy_infection,
+  vaccination_efficacy_hospitalisation = vaccination_efficacy_hospitalisation,
   primary_care_delay = primary_care_delay,
   secondary_care_delay = secondary_care_delay,
   proportion_observed = proportion_observed
