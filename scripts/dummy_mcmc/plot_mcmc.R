@@ -101,23 +101,15 @@ surveillance_data <- readRDS(.args[4])
 known_pars <- readRDS(.args[5])
 years <- known_pars$years
 
-risk_group_pop <- known_pars$risk_group_pop 
-risk_group_pop$age_grp <- factor(risk_group_pop$age_grp, levels = age_labels)
-risk_group_pop <- risk_group_pop %>% 
-  arrange(imd_quintile, age_grp)
-
-vaccinated_pop <- known_pars$vaccinated_pop
-vaccinated_pop$age_grp <- factor(vaccinated_pop$age_grp, levels = age_labels)
-vaccinated_pop <- vaccinated_pop %>% 
-  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
-  mutate(effectively_vaccinated_population = VE*vaccinated_population) %>% 
+vaccinated_data <- known_pars$vaccinated_data
+vaccinated_data$age_grp <- factor(vaccinated_data$age_grp, levels = age_labels)
+vaccinated_data <- vaccinated_data %>% 
   arrange(desc(risk_level), imd_quintile, age_grp)
 
-demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
-                    risk_group_pop %>% mutate(risk_level = 'low')) %>% 
-  mutate(population = case_when(risk_level == 'high' ~ risk_population,
-                                risk_level == 'low' ~ pop - risk_population)) %>% 
-  select(!c(risk_population,pop)) %>% arrange(desc(risk_level), imd_quintile, age_grp)
+demography <- vaccinated_data_seasonal %>% 
+  mutate(population = pop) %>% 
+  select(age_grp, imd_quintile, risk_level, population, risk_proportion) %>% 
+  arrange(desc(risk_level), imd_quintile, age_grp)
 
 ## check population sum is correct
 tot_pop <- sum(imd_age_pop$pop)
@@ -192,7 +184,7 @@ number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 cat('\n------------\n',run_date,'\n------------\n',sep='')
 cat('\n------------\n',number_str,'\n------------\n',sep='')
-number_date_str <- paste0(number_str, '_', date)
+number_date_str <- paste0(number_str, '_', run_date)
 
 # was it run on the HPC? The files saved differently
 WAS_HPC <- output_details_file$HPC
@@ -279,8 +271,6 @@ ggsave(gsub('epidemics','pairwise',.args[length(.args)]), width = 30, height = 3
 
 #### RUN FITTED EPIDEMICS #### 
 
-pop_vaccinated <- vaccinated_pop$effectively_vaccinated_population
-
 ## only do for every tenth/hundredth/thousandth epidemic to save time
 mod_val <- if(nrow(mcmc_samples_filtered) > 100000){1000}else{
   ifelse(nrow(mcmc_samples_filtered) > 10000,100,10)}
@@ -290,6 +280,10 @@ fitted_epidemics <- data.table()
 for(bs in 1:nrow(mcmc_samples_filtered)){ 
   
   if(bs %% mod_val != 0){next} 
+  
+  pop_vaccinated <- vaccinated_data$effectively_vaccinated_population[
+    vaccinated_data$start_of_season == years[mcmc_samples_filtered$epidemic[bs]]
+  ]
   
   init_infected_num <- 10^(mcmc_samples_filtered$init_infected[bs])
   init_infected_vec <- (demography$population - pop_vaccinated)*init_infected_num/

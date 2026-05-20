@@ -55,7 +55,7 @@ contact_matrix$c_age_group <- factor(contact_matrix$c_age_group,
 ## ENSURE ALL POP ORDERS ARE IMD THEN AGE
 contact_matrix <- contact_matrix %>% 
   arrange(p_imd_q, c_imd_q,
-          p_age_group, c_age_group,)
+          p_age_group, c_age_group)
 
 ## into matrix
 cm <- contact_matrix %>% ungroup() %>% 
@@ -69,8 +69,7 @@ cm <- contact_matrix %>% ungroup() %>%
 known_pars <- readRDS(.args[3])
 years <- known_pars$years
 
-risk_group_pop <- known_pars$risk_group_pop
-vaccinated_pop <- known_pars$vaccinated_pop
+vaccinated_data <- known_pars$vaccinated_data
 
 ## UNKNOWN PARAMETERS
 unknown_pars <- readRDS(.args[4])
@@ -87,12 +86,13 @@ for(i in 1:length(years)){
 ## check Reff
 cat('\n')
 for(i in 1:length(years)){
-  v_p <- vaccinated_pop %>% group_by(age_grp, imd_quintile) %>% 
-    summarise(vaccinated_population = sum(vaccinated_population), pop = sum(pop)) %>% 
-    mutate(v_p = vaccinated_population/pop) %>% 
-    arrange(imd_quintile, age_grp) %>% 
-    left_join(known_pars$vaccination_efficacy_infection[start_of_season==years[i]], by = 'age_grp') %>% 
-    mutate(eff_v_p = VE_INF*v_p) ## effectively vaccinated individuals
+  v_p <- vaccinated_data %>%
+    filter(start_of_season == years[i]) %>%
+    group_by(age_grp, imd_quintile) %>% 
+    summarise(effectively_vaccinated_population = sum(effectively_vaccinated_population), 
+              pop = sum(pop)) %>% ungroup() %>% 
+    mutate(eff_v_p = effectively_vaccinated_population/pop) %>% 
+    arrange(imd_quintile, age_grp) 
   
   pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
   cat('Reff = ', R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
@@ -125,17 +125,17 @@ seasonal_seir_outputs <- list()
 
 for(i in 1:length(years)){
   
+  vaccinated_pop_seasonal <- vaccinated_data %>% 
+    filter(start_of_season == years[i]) %>% 
+    arrange(start_of_season, desc(risk_level), imd_quintile, age_grp)
+  
+  ## should be ordered by IMD then age
+  if(vaccinated_pop_seasonal$imd_quintile[2] != 1){warning('vaccinated_data in wrong order')}
+  if(vaccinated_pop_seasonal$age_grp[2] != age_labels[2]){warning('vaccinated_data in wrong order')}
+  
   # population sizes (done here as may become season-specific)
-  pop_stratified <- c(risk_group_pop$pop - risk_group_pop$risk_population,
-                      risk_group_pop$risk_population)
-  
-  # add vaccination coverage (VE is season-specific)
-  vaccinated_pop_seasonal <- vaccinated_pop %>% 
-    left_join(known_pars$vaccination_efficacy_infection[start_of_season == years[i]], 
-              by = 'age_grp') %>% 
-    mutate(effectively_vaccinated_population = VE_INF*vaccinated_population)
-  
-  pop_vaccinated <- c(vaccinated_pop_seasonal$effectively_vaccinated_population)
+  pop_stratified <- vaccinated_pop_seasonal$pop 
+  pop_vaccinated <- vaccinated_pop_seasonal$effectively_vaccinated_population
   
   tot_pop <- sum(imd_age_pop$pop)
   if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}

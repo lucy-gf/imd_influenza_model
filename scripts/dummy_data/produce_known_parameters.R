@@ -144,15 +144,17 @@ vaccinated_pop_1 <- data.table(vcav = rep(vaccination_coverage_age_vector, nimd)
 # split by risk groups
 vaccinated_pop <- rbind(vaccinated_pop_1 %>% mutate(risk_level = 'low', pop = pop - risk_population),
                         vaccinated_pop_1 %>% mutate(risk_level = 'high', pop = risk_population)) %>% 
-  select(!c(risk_population, vcav, vciv))
-
-vaccinated_pop <- vaccinated_pop %>% 
+  select(!c(risk_population, vcav, vciv)) %>% 
+  mutate(nrow = n()) %>% 
+  ## duplicate across years for now
+  slice(rep(row_number(), 3)) %>% 
+  mutate(start_of_season = rep(years, each = nrow[1])) %>% select(!nrow) %>% 
   mutate(vaccinated_population = case_when(
     age_grp %in% c('18-25', '26-34', '35-49', '50-69') & risk_level == 'low' ~ 0,
     T ~ round(vaccinated_proportion*pop)
   )) %>% 
   ## ENSURE ALL POP ORDERS ARE IMD THEN AGE
-  arrange(desc(risk_level), imd_quintile, age_grp)
+  arrange(start_of_season, desc(risk_level), imd_quintile, age_grp)
 
 vaccinated_pop %>% group_by(age_grp,imd_quintile) %>% 
   summarise(vaccinated_population=sum(vaccinated_population)) %>% 
@@ -198,12 +200,8 @@ vaccinated_pop %>%
              shape = 1, stroke=2, size = 3) +
   scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
   theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
-                    y = 'Simulatedercentage in clinical risk group') +
+                    y = 'Simulated percentage in clinical risk group') +
   theme(text = element_text(size = 14))
-
-#### EPI PERIODS ####
-
-epid_periods <- c(2, 3) # latent and infectious periods
 
 #### VACCINE EFFICACY ####
 ## (age-dependent, annual, eventually strain-specific)
@@ -245,20 +243,31 @@ adult_ages <- c('18-25','26-34','35-49','50-69')
 older_adult_ages <- c('70-79','80+')
 
 vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2023, VE := 0.56][
-  age_grp %in% adult_ages & start_of_season == 2023, VE := 0.38][
-  age_grp %in% older_adult_ages & start_of_season == 2023, VE := 0.18]
+  age_grp %in% children_ages & start_of_season == 2023, VE_HOSP := 0.56][
+  age_grp %in% adult_ages & start_of_season == 2023, VE_HOSP := 0.38][
+  age_grp %in% older_adult_ages & start_of_season == 2023, VE_HOSP := 0.18]
 
 vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2024, VE := 0.62][
-  age_grp %in% adult_ages & start_of_season == 2024, VE := 0.46][
-  age_grp %in% older_adult_ages & start_of_season == 2024, VE := 0.40]
+  age_grp %in% children_ages & start_of_season == 2024, VE_HOSP := 0.62][
+  age_grp %in% adult_ages & start_of_season == 2024, VE_HOSP := 0.46][
+  age_grp %in% older_adult_ages & start_of_season == 2024, VE_HOSP := 0.40]
 
 # for now, use 2024/25 values for 2025/26
 vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2025, VE := 0.62][
-  age_grp %in% adult_ages & start_of_season == 2025, VE := 0.46][
-  age_grp %in% older_adult_ages & start_of_season == 2025, VE := 0.40]
+  age_grp %in% children_ages & start_of_season == 2025, VE_HOSP := 0.62][
+  age_grp %in% adult_ages & start_of_season == 2025, VE_HOSP := 0.46][
+  age_grp %in% older_adult_ages & start_of_season == 2025, VE_HOSP := 0.40]
+
+## join together with vaccination coverage data
+
+vaccinated_data <- vaccinated_pop %>% 
+  left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season')) %>% 
+  left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season')) %>% 
+  mutate(effectively_vaccinated_population = VE_INF*vaccinated_population)
+
+#### EPI PERIODS ####
+
+epid_periods <- c(2, 3) # latent and infectious periods
 
 #### DELAYS ####
 ## (in weeks)
@@ -281,11 +290,8 @@ proportion_observed <- CJ(
 
 known_pars <- list(
   years = years,
-  risk_group_pop = risk_group_pop,
-  vaccinated_pop = vaccinated_pop,
+  vaccinated_data = vaccinated_data,
   epid_periods = epid_periods,
-  vaccination_efficacy_infection = vaccination_efficacy_infection,
-  vaccination_efficacy_hospitalisation = vaccination_efficacy_hospitalisation,
   primary_care_delay = primary_care_delay,
   secondary_care_delay = secondary_care_delay,
   proportion_observed = proportion_observed

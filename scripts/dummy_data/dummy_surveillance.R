@@ -29,8 +29,7 @@ infections <- readRDS(.args[1])
 known_pars <- readRDS(.args[2])
 years <- known_pars$years
 
-risk_group_pop <- known_pars$risk_group_pop
-vaccinated_pop <- known_pars$vaccinated_pop
+vaccinated_data <- known_pars$vaccinated_data
 
 opensafely_coverage <- known_pars$proportion_observed
 
@@ -168,8 +167,9 @@ surveillance_data %>%
   scale_color_manual(values = imd_quintile_colors)
 
 sd_plot <- surveillance_data %>% 
-  left_join(vaccinated_pop %>% select(age_grp, imd_quintile, risk_level, pop),
-            by = c('age_grp','imd_quintile','risk_level')) %>% 
+  left_join(vaccinated_data %>% select(start_of_season, age_grp, imd_quintile, risk_level, pop) %>% 
+              rename(index = start_of_season) %>% mutate(index = index - years[1] + 1),
+            by = c('age_grp','imd_quintile','risk_level','index')) %>% 
   left_join(opensafely_coverage,
             by = c('age_grp','imd_quintile','risk_level')) %>% 
   mutate(pop = pop*OS_COVERAGE) %>% select(!OS_COVERAGE) %>% 

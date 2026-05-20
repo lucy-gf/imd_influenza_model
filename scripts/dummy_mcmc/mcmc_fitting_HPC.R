@@ -94,23 +94,20 @@ names(delays) <- c('primary','secondary')
 
 ## population data
 
-risk_group_pop <- known_pars$risk_group_pop 
-risk_group_pop$age_grp <- factor(risk_group_pop$age_grp, levels = age_labels)
-risk_group_pop <- risk_group_pop %>% 
-  arrange(imd_quintile, age_grp)
-
-vaccinated_pop <- known_pars$vaccinated_pop
-vaccinated_pop$age_grp <- factor(vaccinated_pop$age_grp, levels = age_labels)
-vaccinated_pop <- vaccinated_pop %>% 
-  left_join(known_pars$vaccination_efficacy_infection[start_of_season==years[i]], by = 'age_grp') %>% 
-  mutate(effectively_vaccinated_population = VE_INF*vaccinated_population) %>% 
+vaccinated_data_seasonal <- known_pars$vaccinated_data
+vaccinated_data_seasonal$age_grp <- factor(vaccinated_data_seasonal$age_grp, levels = age_labels)
+vaccinated_data_seasonal <- vaccinated_data_seasonal %>% 
+  filter(start_of_season == years[i]) %>% 
   arrange(desc(risk_level), imd_quintile, age_grp)
 
-demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
-                    risk_group_pop %>% mutate(risk_level = 'low')) %>% 
-  mutate(population = case_when(risk_level == 'high' ~ risk_population,
-                                risk_level == 'low' ~ pop - risk_population)) %>% 
-  select(!c(risk_population,pop)) %>% arrange(desc(risk_level), imd_quintile, age_grp)
+## should be ordered by IMD then age
+if(vaccinated_data_seasonal$imd_quintile[2] != 1){warning('vaccinated_data_seasonal in wrong order')}
+if(vaccinated_data_seasonal$age_grp[2] != age_labels[2]){warning('vaccinated_data_seasonal in wrong order')}
+
+demography <- vaccinated_data_seasonal %>% 
+  mutate(population = pop) %>% 
+  select(age_grp, imd_quintile, risk_level, population, risk_proportion) %>% 
+  arrange(desc(risk_level), imd_quintile, age_grp)
 
 ## check population sum is correct
 tot_pop <- sum(imd_age_pop$pop)
@@ -126,7 +123,7 @@ n_samples <- 30000
 
 mcmc_results <- run_mcmc_inference(
   demography_input = demography, 
-  vaccinated_input = vaccinated_pop,
+  vaccinated_input = vaccinated_data_seasonal,
   cm_input = pc_cm, 
   epidemic_to_fit = surveillance_data %>% filter(index==i), 
   epid_periods = known_pars$epid_periods,
