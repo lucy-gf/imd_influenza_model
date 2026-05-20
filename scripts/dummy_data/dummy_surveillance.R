@@ -51,10 +51,57 @@ for(k in 1:length(infections)){
   ## merge with coverage rates and attendance rates
   infections_df <- infections[[k]] %>% 
     mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
+    left_join(known_pars$vaccinated_data %>% 
+                filter(start_of_season == year_i) %>% 
+                select(age_grp, imd_quintile, risk_level, VE_INF, VE_HOSP),
+              by = c('age_grp','imd_quintile','risk_level')) %>% 
     left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile', 'risk_level')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
     mutate(observed_infections = round(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population
+  
+  #### SAMPLE SECONDARY CARE ####
+  # (doing first as then can aggregate by vacc status for primary care sampling)
+  
+  # scale hosp_rate by (1 - VE_HOSP)(1 - VE_INF) for VE against hospitalisation
+  infections_df <- infections_df %>% 
+    mutate(
+      ve_hosp_multiplier = case_when(
+        !vaccinated ~ 1,
+        vaccinated ~ (1 - VE_HOSP)/(1 - VE_INF)
+      ),
+      # if VE_HOSP < VE_INF, assume no protection against hospitalisation
+      ve_hosp_multiplier = case_when(
+        ve_hosp_multiplier > 1 ~ 1,
+        T ~ ve_hosp_multiplier
+      ),
+      hosp_rate = case_when(
+        !vaccinated ~ hosp_rate,
+        vaccinated ~ ve_hosp_multiplier*hosp_rate
+      )
+    ) 
+  # cat('VE HOSP MULTIPLIERS:', round(unique(infections_df$ve_hosp_multiplier), 3),'\n')
+  
+  secondary_care <- c()
+  for(i in 1:nrow(infections_df)){
+    if(infections_df$observed_infections[i] < 1){
+      secondary_care <- c(secondary_care, 0)
+    }else{
+      prob_i <- (infections_df$hosp_rate[i])
+      if(prob_i <= 0){prob_i <- 1e-10}
+      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
+                      prob = prob_i)
+      secondary_care <- c(secondary_care, sec_i)
+    }
+  }
+  
+  infections_df$secondary_care <- secondary_care
+  
+  ## aggregate over vaccination status 
+  infections_df <- infections_df %>% 
+    summarise(.by = c(t, age_grp, imd_quintile, risk_level, pop, start_date, 
+                      infections, gp_rate, OS_COVERAGE, observed_infections),
+              secondary_care = sum(secondary_care))
   
   #### SAMPLE PRIMARY CARE ####
   
@@ -72,23 +119,6 @@ for(k in 1:length(infections)){
   }
   
   infections_df$primary_care <- primary_care
-  
-  #### SAMPLE SECONDARY CARE ####
-  
-  secondary_care <- c()
-  for(i in 1:nrow(infections_df)){
-    if(infections_df$observed_infections[i] < 1){
-      secondary_care <- c(secondary_care, 0)
-    }else{
-      prob_i <- (infections_df$hosp_rate[i])
-      if(prob_i <= 0){prob_i <- 1e-10}
-      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
-                      prob = prob_i)
-      secondary_care <- c(secondary_care, sec_i)
-    }
-  }
-  
-  infections_df$secondary_care <- secondary_care
   
   #### MAKE INTO TIME SERIES ####
   
@@ -120,7 +150,7 @@ full_df_agg <- full_df %>%
   summarise(infections = sum(infections),
             observed_infections = sum(observed_infections),
             primary_care = sum(primary_care), 
-            secondary_care = sum(secondary_care))
+            secondary_care = sum(secondary_care)) %>% ungroup()
 
 full_df_agg %>% mutate(date = last_monday(date)) %>% 
   group_by(date, imd_quintile) %>%
@@ -149,11 +179,25 @@ full_df_agg %>% group_by(index) %>%
 #### SAVE DATA ####
 
 # actual surveillance data won't include infections, and will only be weekly
-surveillance_data <- full_df_agg %>% 
-  group_by(age_grp, imd_quintile, risk_level) %>% 
-  complete(date = seq.Date(from = as.Date(paste0('01-01-',year(full_df_agg$date[1])), format = '%d-%m-%Y') + 7,
-                           to = max(full_df_agg$date), by = 1),
-           fill = list(index = 1, infections = 0, primary_care = 0, secondary_care = 0)) %>% 
+extra_dates <- rbind(
+  data.frame(
+    date = seq.Date(from = as.Date(paste0('01-01-',years[1]), format = '%d-%m-%Y') + 7,
+            to = max(full_df_agg[full_df_agg$index == 1,]$date), by = 1), index = 1),
+  data.frame(
+    date = seq.Date(from = max(full_df_agg[full_df_agg$index == 1,]$date) + 7,
+             to = max(full_df_agg[full_df_agg$index == 2,]$date), by = 1), index = 2),
+  data.frame(
+    date = seq.Date(from = max(full_df_agg[full_df_agg$index == 2,]$date) + 7,
+             to = max(full_df_agg[full_df_agg$index == 3,]$date), by = 1), index = 3))
+
+surveillance_data <- cross_join(extra_dates, full_df_agg %>% 
+                                  select(age_grp, imd_quintile, risk_level) %>% 
+                                  unique()) %>% 
+  left_join(full_df_agg %>% 
+              select(age_grp, imd_quintile, risk_level, date, index, primary_care, secondary_care),
+            by = c('index', 'date', 'age_grp', 'imd_quintile', 'risk_level')) %>% 
+  mutate(primary_care = case_when(is.na(primary_care) ~ 0, T ~ primary_care),
+         secondary_care = case_when(is.na(secondary_care) ~ 0, T ~ secondary_care)) %>% 
   mutate(week_start = last_monday(date)) %>% 
   group_by(week_start, age_grp, imd_quintile, index, risk_level) %>% 
   summarise(primary_care = sum(primary_care),

@@ -96,6 +96,10 @@ true_infections_list <- readRDS(.args[3])
 
 #### SURVEILLANCE DATA #### 
 surveillance_data <- readRDS(.args[4])
+if(nrow(surveillance_data) != nrow(unique(surveillance_data %>% ungroup() %>% 
+                                          select(age_grp, imd_quintile, risk_level, week_start)))){
+  warning('Surveillance data wrongly indexed')
+}
 
 #### KNOWN PARAMETERS #### 
 known_pars <- readRDS(.args[5])
@@ -106,7 +110,7 @@ vaccinated_data$age_grp <- factor(vaccinated_data$age_grp, levels = age_labels)
 vaccinated_data <- vaccinated_data %>% 
   arrange(desc(risk_level), imd_quintile, age_grp)
 
-demography <- vaccinated_data_seasonal %>% 
+demography <- vaccinated_data %>% 
   mutate(population = pop) %>% 
   select(age_grp, imd_quintile, risk_level, population, risk_proportion) %>% 
   arrange(desc(risk_level), imd_quintile, age_grp)
@@ -182,8 +186,8 @@ read_and_get_samples <- function(i){
 output_details_file <- readRDS(.args[7])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
-cat('\n------------\n',run_date,'\n------------\n',sep='')
-cat('\n------------\n',number_str,'\n------------\n',sep='')
+cat('\n------------\nDate: ',as.character(run_date),'\n------------\n',sep='')
+cat('\n------------\nSettings: ',number_str,'\n------------\n',sep='')
 number_date_str <- paste0(number_str, '_', run_date)
 
 # was it run on the HPC? The files saved differently
@@ -281,7 +285,10 @@ for(bs in 1:nrow(mcmc_samples_filtered)){
   
   if(bs %% mod_val != 0){next} 
   
-  pop_vaccinated <- vaccinated_data$effectively_vaccinated_population[
+  pop_vaccinated <- vaccinated_data$vaccinated_population[
+    vaccinated_data$start_of_season == years[mcmc_samples_filtered$epidemic[bs]]
+  ]
+  VE_INF <- vaccinated_data$VE_INF[
     vaccinated_data$start_of_season == years[mcmc_samples_filtered$epidemic[bs]]
   ]
   
@@ -292,7 +299,8 @@ for(bs in 1:nrow(mcmc_samples_filtered)){
   time_series <- run_model(
     pop = demography$population,
     I0 = init_infected_vec,
-    vacc = pop_vaccinated,
+    vacc_cov = pop_vaccinated,
+    ve_inf = VE_INF,
     cm = pc_cm,
     trans = mcmc_samples_filtered$transmissibility[bs],
     susc = susc_vector(mcmc_samples_filtered[bs, paste0('susceptibility_',1:2)]),
@@ -547,21 +555,37 @@ fitted_and_obs %>% group_by(age_grp, imd_quintile) %>%
 
 ## fitted surveillance data
 
-fitted_surv_dat <- fitted_epidemics_surv %>% 
+fitted_surv_dat <- fitted_epidemics %>% 
   left_join(broad_ages, by = 'age_grp') %>% 
-  left_join(surveillance_data %>% 
-              rename(date = week_start, epidemic = index) %>% mutate(imd_quintile = as.factor(imd_quintile)), 
-            by = c('date','age_grp','imd_quintile','risk_level', 'epidemic')) %>% 
   left_join(mcmc_surveillance_rates_w,
             by = c('broad_age','imd_quintile','risk_level','chain','iteration','epidemic')) %>% 
   left_join(known_pars$proportion_observed %>% mutate(imd_quintile = as.factor(imd_quintile)), 
             by = c('age_grp','imd_quintile','risk_level')) %>% 
+  left_join(vaccinated_data %>% select(age_grp, imd_quintile, risk_level, start_of_season, VE_INF, VE_HOSP) %>% 
+              mutate(epidemic = start_of_season - year(fitted_epidemics$date[1]) + 1,
+                     imd_quintile = as.factor(imd_quintile)),
+            by = c('age_grp','imd_quintile','risk_level','epidemic')) %>% 
+  # scale down IHR for ineffectively vaccinated infections
+  mutate(
+    ve_hosp_multiplier = case_when(
+      !vaccinated ~ 1, vaccinated ~ (1 - VE_HOSP)/(1 - VE_INF)),
+    # if VE_HOSP < VE_INF, assume no protection against hospitalisation
+    ve_hosp_multiplier = case_when(
+      ve_hosp_multiplier > 1 ~ 1, T ~ ve_hosp_multiplier),
+    secondary_rate = case_when(
+      !vaccinated ~ secondary_rate, vaccinated ~ ve_hosp_multiplier*secondary_rate)) %>% 
+  select(!ve_hosp_multiplier) %>% 
   mutate(observed_primary = infections*primary_rate*OS_COVERAGE,
          observed_secondary = infections*secondary_rate*OS_COVERAGE) %>% 
-  group_by(iteration, chain, date, age_grp, imd_quintile, 
-           risk_level, primary_care, secondary_care) %>% 
+  group_by(iteration, chain, date, age_grp, imd_quintile, risk_level) %>% 
   summarise(observed_primary = sum(observed_primary),
-            observed_secondary = sum(observed_secondary))
+            observed_secondary = sum(observed_secondary)) %>% 
+  left_join(surveillance_data %>% ungroup() %>% select(!index) %>% 
+              rename(date = week_start) %>% 
+              filter(date %in% unique(fitted_epidemics$date)) %>% 
+              mutate(imd_quintile = as.factor(imd_quintile)), 
+            by = c('date','age_grp','imd_quintile','risk_level')) 
+
 fitted_surv_dat <- data.table(fitted_surv_dat)
 
 fitted_surv_dat[, c('iteration', 'chain') := NULL]

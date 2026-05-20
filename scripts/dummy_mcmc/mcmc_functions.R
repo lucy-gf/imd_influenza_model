@@ -99,7 +99,8 @@ run_mcmc_inference <- function(
       return(-Inf)
     }
     
-    pop_vaccinated <- vaccinated_input$effectively_vaccinated_population
+    pop_vaccinated <- vaccinated_input$vaccinated_population
+    VE_INF <- vaccinated_input$VE_INF
     
     init_infected_vec <- (demography_input$population - pop_vaccinated)*init_infected_num/
       (sum(demography_input$population)-sum(pop_vaccinated))
@@ -107,7 +108,8 @@ run_mcmc_inference <- function(
     time_series <- run_model(
       pop = demography_input$population,
       I0 = init_infected_vec,
-      vacc = pop_vaccinated,
+      vacc_cov = pop_vaccinated,
+      ve_inf = VE_INF,
       cm = cm_input,
       trans = transmissibility,
       susc = susceptibility,
@@ -125,62 +127,75 @@ run_mcmc_inference <- function(
     # Calculate value of OBSERVED infections 
     time_series <- time_series[coverage_rates, on = c('age_grp','imd_quintile','risk_level')]
     time_series_fit <- time_series[, .(infections = sum(OS_COVERAGE*infections)),
-                                   by = .(date, age_grp, imd_quintile, risk_level)]
+                                   by = .(date, age_grp, imd_quintile, risk_level, vaccinated)]
     time_series_fit[, imd_quintile := as.numeric(imd_quintile)]
     
     if(any(is.na(time_series_fit))) return(-Inf)
     
-    setorder(time_series_fit, age_grp, imd_quintile, risk_level)
-    
-    # REMOVED - Check epidemic is growing at start, and not at the end
-    # if(time_series_fit$infections[1] > time_series_fit$infections[5]) return(-Inf)
-    # if(time_series_fit$infections[nrow(time_series_fit)] > time_series_fit$infections[nrow(time_series_fit)-5]) return(-Inf)
+    setorder(time_series_fit, age_grp, imd_quintile, risk_level, vaccinated)
     
     # Aggregate to weekly and join with surveillance data
     time_series_fit[, week_start := last_monday(date)]
     time_series_weekly <- time_series_fit[, .(infections = sum(infections)), 
-                                          by = .(week_start, age_grp, imd_quintile, risk_level)]
+                                          by = .(week_start, age_grp, imd_quintile, risk_level, vaccinated)]
     
-    # Join with observed data
-    time_series_joint <- merge(time_series_weekly, epidemic_dt, 
-                               by = c('age_grp', 'imd_quintile', 'week_start', 'risk_level'), 
-                               all.x = F)
-    
-    # Pivot primary_care and secondary_care to long format
-    time_series_long <- melt(time_series_joint, 
-                             measure.vars = c('primary_care', 'secondary_care'),
-                             variable.name = 'setting', 
-                             value.name = 'observations')
-    
-    # Join reporting rates
-    time_series_long <- merge(time_series_long, reporting_long,
+    # Join reporting rates (make primary and secondary care versions)
+    time_series_long <- merge(rbind(cbind(time_series_weekly, setting = unique(reporting_long$setting)[1]),
+                                    cbind(time_series_weekly, setting = unique(reporting_long$setting)[2])), 
+                              reporting_long,
                               by = colnames(reporting_long)[colnames(reporting_long) != 'rate'],
                               all.x = TRUE)
+    
+    # Scale down hospitalisation rate for those ineffectively vaccinated
+    # (VE_HOSP must be geq VI_INF)
+    time_series_long <- merge(time_series_long, 
+                              vaccinated_input[start_of_season == year(start_of_epidemic), 
+                                               c('age_grp','imd_quintile','risk_level','VE_INF','VE_HOSP')],
+                              by = c('age_grp','imd_quintile','risk_level'),
+                              all.x = TRUE)
+    time_series_long[
+      VE_HOSP >= VE_INF & vaccinated & setting == 'secondary_care', rate := rate*((1 - VE_HOSP)/(1 - VE_INF))
+    ]
+    
+    time_series_long[, c('VE_HOSP','VE_INF') := NULL]
     
     # Validate reporting rates
     if(any(is.na(time_series_long$rate))) return(-Inf)
     if(any(time_series_long$rate <= 0 | time_series_long$rate >= 1)) return(-Inf)
     
-    ## shift observations by the care delays
-    time_series_shifted <- rbind(
-      time_series_long[setting=='primary_care'][,
-                                                observations := shift(observations, n = -delays['primary'], fill = 0),
-                                                by = .(age_grp, imd_quintile, risk_level, index, rate)],
-      time_series_long[setting=='secondary_care'][,
-                                                  observations := shift(observations, n = -delays['secondary'], fill = 0),
-                                                  by = .(age_grp, imd_quintile, risk_level, index, rate)])
+    # Aggregate over vaccination status into a mean number of cases per {group x setting}
+    # (as the rate varies between vaccinated/unvaccinated, but observations are not vaccination-specific)
+    time_series_agg <- time_series_long[,
+      .(expected_cases = sum(infections*rate)),
+      by = list(age_grp, imd_quintile, risk_level, setting, week_start)
+    ]
+    
+    # Pivot observed data longer
+    observed_data <- melt(epidemic_dt, # pivot to long format
+                          measure.vars = c('primary_care', 'secondary_care'),
+                          variable.name = 'setting', 
+                          value.name = 'observations')
+    
+    ## Shift observations by the care delays
+    observed_data <- rbind(observed_data[setting=='primary_care'][,
+                                                                  observations := shift(observations, n = -delays['primary'], fill = 0),
+                                                                  by = .(age_grp, imd_quintile, risk_level, index)],
+                           observed_data[setting=='secondary_care'][,
+                                                                    observations := shift(observations, n = -delays['secondary'], fill = 0),
+                                                                    by = .(age_grp, imd_quintile, risk_level, index)])
+    
+    # Merge with observed data
+    time_series_joint <- merge(time_series_agg, 
+                               observed_data,
+                               by = c('age_grp', 'imd_quintile', 'week_start', 'risk_level', 'setting'), 
+                               all.x = F)
     
     if(F){
-      time_series_shifted %>% ## plot {observations} against {infections x reporting rates}
+      time_series_joint %>% ## plot {observations} against {infections x reporting rates}
         ggplot() + theme_bw() +
-        geom_line(aes(week_start,rate*infections, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
+        geom_line(aes(week_start,expected_cases, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
         geom_point(aes(week_start,observations, shape=risk_level, col=setting, group=interaction(setting, risk_level)), alpha = 0.4) +
         facet_grid(age_grp ~ imd_quintile, scales = 'free')
-      time_series_shifted %>%
-        ggplot() + theme_bw() +
-        geom_jitter(aes(week_start, infections >= observations, shape=risk_level, col=setting, 
-                        group=interaction(setting, risk_level)), width = 1, height = 0.1) +
-        facet_grid(age_grp ~ imd_quintile, scales = 'free') # should be TRUE everywhere
       }
     
     # OLD (FOR BINOMIAL LLIKELIHOOD):
@@ -191,8 +206,8 @@ run_mcmc_inference <- function(
     
     # Vectorised log likelihood
     total_ll <- sum(dpois(
-      x    = time_series_shifted$observations,
-      lambda = time_series_shifted$infections*time_series_shifted$rate,
+      x    = time_series_joint$observations,
+      lambda = time_series_joint$expected_cases,
       log  = TRUE
     ), na.rm = TRUE)
     

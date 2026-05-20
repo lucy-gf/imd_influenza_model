@@ -8,7 +8,8 @@ Rcpp::sourceCpp('scripts/seir_model.cpp')
 run_model <- function(
     pop,
     I0,
-    vacc,
+    vacc_cov,
+    ve_inf,
     cm,
     trans,
     susc,
@@ -17,59 +18,37 @@ run_model <- function(
     t_end = 250
 ) {
   
-  # susceptibility is age-speciifc
+  # susceptibility is age-specific
   if(length(susc) != dim(cm)[1]){ 
     susc <- rep(susc, dim(cm)[1]/length(susc))
   }
   
-  ## OLD CODE FROM ODIN SEIR MODEL (AT BOTTOM OF SCRIPT) ##
-  # model <- seeiir_risk_odin$new(
-  #   no_groups = ndim,
-  #   pop = pop,
-  #   I0 = I0,
-  #   vacc = vacc,
-  #   trans = trans,
-  #   susc = susc,
-  #   lat_per = lat_per,
-  #   inf_per = inf_per,
-  #   cij = cm
-  # )
-  # 
-  # times <- seq(0, t_end, by = 0.1)
-  # 
-  # out <- data.table(model$run(times, method = "euler"))
-  ## using euler solver for speed in the MCMC
-  # # keep only cumI columns
-  # cumI_cols <- c('t', grep('^cumI', colnames(out), value = TRUE))
-  # out <- out[, ..cumI_cols]
-  # 
-  # out <- out[t %% 1 == 0] # keep only integer time points 
-  
   # call C++ solver
   raw <- run_seir_cpp(
-    pop    = pop,
-    I0     = I0,
-    vacc   = vacc,
-    trans  = trans,
-    susc   = susc,
+    pop     = pop,
+    I0      = I0,
+    vacc_cov= vacc_cov,
+    ve_inf  = ve_inf,
+    trans   = trans,
+    susc    = susc,
     lat_per = lat_per,
     inf_per = inf_per,
-    cij    = cm,
-    t_end  = t_end,
-    dt     = 0.1
+    cij     = cm,
+    t_end   = t_end,
+    dt      = 0.1
   )
   
   # raw is matrix: col 1 = t, cols 2:(ng+1) = cumI per group
-  ng  <- ncol(raw) - 1
+  ng  <- (ncol(raw) - 1)/2
   out <- data.table(raw)
-  setnames(out, c('t', paste0('cumI[', 1:ng, ']')))
+  setnames(out, c('t', paste0('cumI[', 1:ng, ']'), paste0('cumIv[', 1:ng, ']')))
   
   out_formatted <- tidy_output(out)
   
   ## infections = cumulative(t) - cumulative(t-1)
-  setorder(out_formatted, age_grp, imd_quintile, risk_level, t)
+  setorder(out_formatted, age_grp, imd_quintile, risk_level, vaccinated, t)
   out_formatted[, infections := value - shift(value, fill = 0), 
-                   by = .(age_grp, imd_quintile, risk_level)]
+                   by = .(age_grp, imd_quintile, risk_level, vaccinated)]
   
   out_formatted[, c('compartment','value') := NULL]
   
@@ -104,6 +83,8 @@ tidy_output <- function(out_dt) {
   
   long_dt <- melt.data.table(out_dt, id.vars='t')
   
+  long_dt[, vaccinated := grepl('v', long_dt$variable)]
+  long_dt[, variable := gsub('v', '', long_dt$variable)]
   long_dt[, compartment := gsub("(.+)\\[(\\d+)\\]", "\\1", long_dt$variable)]
   long_dt[, group := gsub("(.+)\\[(\\d+)\\]", "\\2", long_dt$variable)]
   long_dt[, variable := NULL]
@@ -111,11 +92,11 @@ tidy_output <- function(out_dt) {
   long_dt[compartment %in% c('E1','E2'), compartment := "E"]
   long_dt[compartment %in% c('I1','I2'), compartment := "I"]
   
-  long_dt <- long_dt[, lapply(.SD, sum), by = c('t','compartment','group')]
+  long_dt <- long_dt[, lapply(.SD, sum), by = c('t','vaccinated','compartment','group')]
   
   long_dt <- long_dt[lookup, on = "group"]
   
-  return(long_dt[, c('t','age_grp','imd_quintile','risk_level','compartment','value')])
+  return(long_dt[, c('t','age_grp','imd_quintile','risk_level','vaccinated','compartment','value')])
 }
 
 #### EXPAND CONTACT MATRIX ####
@@ -202,6 +183,49 @@ last_monday <- function(dates){
 
 # #### OLD SEIR MODEL (ODIN) ####
 # 
+# model <- seeiir_risk_odin$new(
+#   no_groups = ndim,
+#   pop = pop,
+#   I0 = I0,
+#   vacc = vacc,
+#   trans = trans,
+#   susc = susc,
+#   lat_per = lat_per,
+#   inf_per = inf_per,
+#   cij = cm
+# )
+# 
+# times <- seq(0, t_end, by = 0.1)
+# 
+# out <- data.table(model$run(times, method = "euler"))
+## using euler solver for speed in the MCMC
+# # keep only cumI columns
+# cumI_cols <- c('t', grep('^cumI', colnames(out), value = TRUE))
+# out <- out[, ..cumI_cols]
+# 
+# out <- out[t %% 1 == 0] # keep only integer time points 
+#
+# model <- seeiir_risk_odin$new(
+#   no_groups = ndim,
+#   pop = pop,
+#   I0 = I0,
+#   vacc = vacc,
+#   trans = trans,
+#   susc = susc,
+#   lat_per = lat_per,
+#   inf_per = inf_per,
+#   cij = cm
+# )
+# 
+# times <- seq(0, t_end, by = 0.1)
+# 
+# out <- data.table(model$run(times, method = "euler"))
+## using euler solver for speed in the MCMC
+# # keep only cumI columns
+# cumI_cols <- c('t', grep('^cumI', colnames(out), value = TRUE))
+# out <- out[, ..cumI_cols]
+# 
+# out <- out[t %% 1 == 0] # keep only integer time points 
 # seeiir_risk_odin <- odin::odin({
 #   
 #   # User supplied parameters

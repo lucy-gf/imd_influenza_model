@@ -263,7 +263,7 @@ vaccination_efficacy_hospitalisation[
 vaccinated_data <- vaccinated_pop %>% 
   left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season')) %>% 
   left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season')) %>% 
-  mutate(effectively_vaccinated_population = VE_INF*vaccinated_population)
+  mutate(effectively_vaccinated_population = round(VE_INF*vaccinated_population))
 
 #### EPI PERIODS ####
 

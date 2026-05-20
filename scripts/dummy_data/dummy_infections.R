@@ -135,7 +135,8 @@ for(i in 1:length(years)){
   
   # population sizes (done here as may become season-specific)
   pop_stratified <- vaccinated_pop_seasonal$pop 
-  pop_vaccinated <- vaccinated_pop_seasonal$effectively_vaccinated_population
+  pop_vaccinated <- vaccinated_pop_seasonal$vaccinated_population
+  VE_INF <- vaccinated_pop_seasonal$VE_INF
   
   tot_pop <- sum(imd_age_pop$pop)
   if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
@@ -149,7 +150,8 @@ for(i in 1:length(years)){
   time_series <- run_model(
     pop = pop_stratified,
     I0 = init_infected_vec,
-    vacc = pop_vaccinated,
+    vacc_cov = pop_vaccinated,
+    ve_inf = VE_INF,
     cm = pc_cm,
     trans = pars$transmissibility,
     susc = pars$susceptibility,
@@ -175,7 +177,7 @@ names(seasonal_seir_outputs) <- years
   
 seasonal_seir_outputs[[1]] %>% 
   ggplot() +
-  geom_line(aes(t, infections/pop, col = imd_quintile)) +
+  geom_line(aes(t, infections/pop, col = imd_quintile, lty = vaccinated)) +
   scale_color_manual(values = imd_quintile_colors) +
   facet_grid(age_grp ~ risk_level, scales = 'free')
 
@@ -187,7 +189,8 @@ plot_final_size <- function(k){
     group_by(age_grp, imd_quintile, risk_level, pop) %>% 
     summarise(infections = sum(infections)) %>% 
     ggplot() + 
-    geom_bar(aes(x = age_grp, y = 100*infections/pop, fill = imd_quintile),
+    geom_bar(aes(x = age_grp, y = 100*infections/pop, 
+                 fill = imd_quintile),
              stat = 'identity', position = 'dodge') + 
     theme_bw() + 
     scale_fill_manual(values = imd_quintile_colors) +
