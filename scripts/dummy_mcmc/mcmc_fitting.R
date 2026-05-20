@@ -92,37 +92,42 @@ years <- known_pars$years
 delays <- c(known_pars$primary_care_delay, known_pars$secondary_care_delay)
 names(delays) <- c('primary','secondary')
 
-risk_group_pop <- known_pars$risk_group_pop 
-risk_group_pop$age_grp <- factor(risk_group_pop$age_grp, levels = age_labels)
-risk_group_pop <- risk_group_pop %>% 
-  arrange(imd_quintile, age_grp)
-
-vaccinated_pop <- known_pars$vaccinated_pop
-vaccinated_pop$age_grp <- factor(vaccinated_pop$age_grp, levels = age_labels)
-vaccinated_pop <- vaccinated_pop %>% 
-  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
-  mutate(effectively_vaccinated_population = VE*vaccinated_population) %>% 
-  arrange(desc(risk_level), imd_quintile, age_grp)
-
-demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
-                    risk_group_pop %>% mutate(risk_level = 'low')) %>% 
-  mutate(population = case_when(risk_level == 'high' ~ risk_population,
-                                risk_level == 'low' ~ pop - risk_population)) %>% 
-  select(!c(risk_population,pop)) %>% arrange(desc(risk_level), imd_quintile, age_grp)
-
-## check population sum is correct
-tot_pop <- sum(imd_age_pop$pop)
-if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
-
 #### RUNNING MCMC ####
 
+## MCMC pars
 nchains <- 3
 burn_in <- 10
 thinning_value <- 2
 n_samples <- 10
 
 mcmc_parallel <- function(i){
+  
   txt_output <<- i
+  
+  ## population data
+  
+  risk_group_pop <- known_pars$risk_group_pop 
+  risk_group_pop$age_grp <- factor(risk_group_pop$age_grp, levels = age_labels)
+  risk_group_pop <- risk_group_pop %>% 
+    arrange(imd_quintile, age_grp)
+  
+  vaccinated_pop <- known_pars$vaccinated_pop
+  vaccinated_pop$age_grp <- factor(vaccinated_pop$age_grp, levels = age_labels)
+  vaccinated_pop <- vaccinated_pop %>% 
+    left_join(known_pars$vaccination_efficacy_infection[start_of_season==years[i]], by = 'age_grp') %>% 
+    mutate(effectively_vaccinated_population = VE_INF*vaccinated_population) %>% 
+    arrange(desc(risk_level), imd_quintile, age_grp)
+  
+  demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
+                      risk_group_pop %>% mutate(risk_level = 'low')) %>% 
+    mutate(population = case_when(risk_level == 'high' ~ risk_population,
+                                  risk_level == 'low' ~ pop - risk_population)) %>% 
+    select(!c(risk_population,pop)) %>% arrange(desc(risk_level), imd_quintile, age_grp)
+  
+  ## check population sum is correct
+  tot_pop <- sum(imd_age_pop$pop)
+  if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
+  
   run_mcmc_inference(
     demography_input = demography, 
     vaccinated_input = vaccinated_pop,

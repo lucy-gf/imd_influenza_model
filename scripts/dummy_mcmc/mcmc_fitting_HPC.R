@@ -92,6 +92,8 @@ years <- known_pars$years
 delays <- c(known_pars$primary_care_delay, known_pars$secondary_care_delay)
 names(delays) <- c('primary','secondary')
 
+## population data
+
 risk_group_pop <- known_pars$risk_group_pop 
 risk_group_pop$age_grp <- factor(risk_group_pop$age_grp, levels = age_labels)
 risk_group_pop <- risk_group_pop %>% 
@@ -100,8 +102,8 @@ risk_group_pop <- risk_group_pop %>%
 vaccinated_pop <- known_pars$vaccinated_pop
 vaccinated_pop$age_grp <- factor(vaccinated_pop$age_grp, levels = age_labels)
 vaccinated_pop <- vaccinated_pop %>% 
-  left_join(known_pars$vaccination_efficacy, by = 'age_grp') %>% 
-  mutate(effectively_vaccinated_population = VE*vaccinated_population) %>% 
+  left_join(known_pars$vaccination_efficacy_infection[start_of_season==years[i]], by = 'age_grp') %>% 
+  mutate(effectively_vaccinated_population = VE_INF*vaccinated_population) %>% 
   arrange(desc(risk_level), imd_quintile, age_grp)
 
 demography <- rbind(risk_group_pop %>% mutate(risk_level = 'high'),
@@ -116,6 +118,7 @@ if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')
 
 #### RUNNING MCMC ####
 
+## MCMC pars
 nchains <- 3
 burn_in <- 80000
 thinning_value <- 5
