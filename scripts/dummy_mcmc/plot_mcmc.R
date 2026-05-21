@@ -113,7 +113,8 @@ vaccinated_data <- vaccinated_data %>%
 demography <- vaccinated_data %>% 
   mutate(population = pop) %>% 
   select(age_grp, imd_quintile, risk_level, population, risk_proportion) %>% 
-  arrange(desc(risk_level), imd_quintile, age_grp)
+  arrange(desc(risk_level), imd_quintile, age_grp) %>% 
+  unique()
 
 ## check population sum is correct
 tot_pop <- sum(imd_age_pop$pop)
@@ -175,7 +176,7 @@ read_and_get_samples <- function(i){
     samp[, chain := k][, iteration := 1:nrow(samp)]
     samp
   }
-  dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_str,'.rds'),.args[7]))
+  dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[7]))
   list_samples <- mclapply(1:3, get_samples_parallel)
   samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
@@ -186,7 +187,7 @@ read_and_get_samples <- function(i){
 output_details_file <- readRDS(.args[7])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
-cat('\n------------\nDate: ',as.character(run_date),'\n------------\n',sep='')
+cat('\n------------\nDate run: ',as.character(run_date),'\n------------\n',sep='')
 cat('\n------------\nSettings: ',number_str,'\n------------\n',sep='')
 number_date_str <- paste0(number_str, '_', run_date)
 
