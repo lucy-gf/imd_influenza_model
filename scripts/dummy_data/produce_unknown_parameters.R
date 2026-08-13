@@ -16,6 +16,7 @@ options(dplyr.summarise.inform = FALSE)
 set.seed(60)
 
 source(file.path("scripts","setup","colors.R"))
+source(file.path('scripts','setup','age_grp_assignment.R'))
 
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
@@ -33,10 +34,25 @@ imd_age_pop$age_grp <- factor(imd_age_pop$age_grp, levels = age_labels)
 imd_age_pop <- imd_age_pop %>% 
   arrange(imd_quintile, age_grp)
 
-broad_ages <- data.table(
+broad_ages_susc <- data.table(
   age_grp = age_labels, 
-  broad_age = c(rep('children', 3), rep('adults', 4), rep('older_adults', 2))
+  broad_age = fcn_assign_ages(
+    'children', 
+    'adults',
+    'older_adults',
+    age_labels
+    )
 )
+broad_ages_care_rates <- data.table(
+  age_grp = age_labels, 
+  broad_age = fcn_assign_ages(
+    'children', 
+    'adults',
+    'older_adults',
+    age_labels
+  )
+)
+
 
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
@@ -70,7 +86,7 @@ susceptibility_matrix[, susceptibility := susceptibility/adults_val]
 susceptibility_matrix[, adults_val := NULL]
 
 ## turn into age groups
-susceptibility_long <- cross_join(susceptibility_matrix, broad_ages)[broad_age.x==broad_age.y]
+susceptibility_long <- cross_join(susceptibility_matrix, broad_ages_susc)[broad_age.x==broad_age.y]
 susceptibility_long[, c('broad_age.x','broad_age.y') := NULL]
 susceptibility_long$age_grp <- factor(susceptibility_long$age_grp, levels = age_labels)
 setorder(susceptibility_long, year, age_grp)
@@ -112,7 +128,7 @@ hosp_rate <- c(2, 0.1, 2, 8, 3, 15)/100
 ## HIGH RISK CHILDREN, ADULTS, OLDER ADULTS
 
 care_rate_df <- data.frame(
-  broad_age = rep(unique(broad_ages$broad_age), 2),
+  broad_age = rep(unique(broad_ages_care_rates$broad_age), 2),
   risk_level = rep(c('low','high'), each = 3),
   gp_rate = gp_rate,
   hosp_rate = hosp_rate
@@ -120,7 +136,7 @@ care_rate_df <- data.frame(
 
 care_rate_age_df <- data.table(cross_join(
   care_rate_df,
-  broad_ages))[broad_age.x == broad_age.y,]
+  broad_ages_care_rates))[broad_age.x == broad_age.y,]
 care_rate_age_df[, c('broad_age.x','broad_age.y') := NULL]
 
 imd_spline_pars <- data.table(
@@ -143,8 +159,13 @@ care_rate_imd_df$age_grp <- factor(care_rate_imd_df$age_grp, levels = age_labels
 ratep1 <- care_rate_imd_df %>% 
   pivot_longer(c(gp_rate, hosp_rate)) %>% 
   ggplot() + 
-  geom_line(aes(age_grp, value, group = interaction(name,imd_quintile), 
+  geom_line(aes(age_grp, value, group = imd_quintile, 
                 col = as.factor(imd_quintile)), lwd = 0.8) +
+  geom_point(aes(x = age_grp, group = imd_quintile, 
+                 y = value), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, group = imd_quintile, 
+                 col = as.factor(imd_quintile), y = value), stroke=1.5, size = 3, shape = 1) +
   theme_bw() + ylim(c(0,NA)) + facet_grid(name ~ risk_level, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors) +
   labs(y='Rate', col = 'IMD quintile'); ratep1

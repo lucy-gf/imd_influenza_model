@@ -2,6 +2,7 @@
 
 #### SETUP ####
 suppressMessages(require(ggplot2))
+suppressMessages(require(patchwork))
 suppressMessages(require(tidyverse))
 suppressMessages(require(data.table))
 suppressMessages(require(readr))
@@ -16,6 +17,7 @@ options(dplyr.summarise.inform = FALSE)
 if(!dir.exists(file.path("data", "dummy_data"))){dir.create(file.path("data", "dummy_data"))}
 
 source(file.path('scripts','setup','colors.R'))
+source(file.path('scripts','setup','age_grp_assignment.R'))
 
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
@@ -86,10 +88,11 @@ if(USING_TRUE_RISK_DAT){
   risk_group_adults <- 0.08
   risk_group_elderly <- 0.4
   
-  risk_group_age_vector <- c(
-    rep(risk_group_kids, 3),
-    rep(risk_group_adults, 4),
-    rep(risk_group_elderly, 2)
+  risk_group_age_vector <- fcn_assign_ages(
+    risk_group_kids, 
+    risk_group_adults,
+    risk_group_elderly,
+    age_labels
   )
   
   ## add some variation by IMD
@@ -114,8 +117,10 @@ risk_group_pop %>%
                            group=imd_quintile))
 
 risk_group_pop %>% 
-  ggplot() + geom_line(aes(age_grp, risk_proportion, col=imd_quintile,
-                           group=imd_quintile)) 
+  ggplot() + geom_line(aes(age_grp, risk_proportion, col=as.factor(imd_quintile),
+                           group=imd_quintile), lwd = 0.8) + 
+  scale_color_manual(values = imd_quintile_colors) + theme_bw() + 
+  labs(x = '', y = 'Proportion in risk group', col = 'IMD')
 
 #### VACCINATION COVERAGE #### 
 
@@ -125,10 +130,11 @@ vaccination_coverage_kids <- 0.55
 vaccination_coverage_elderly <- 0.75
 vaccination_coverage_risk <- 0.4
 
-vaccination_coverage_age_vector <- c(
-  rep(vaccination_coverage_kids, 3),
-  rep(vaccination_coverage_risk, 4),
-  rep(vaccination_coverage_elderly, 2)
+vaccination_coverage_age_vector <- fcn_assign_ages(
+  vaccination_coverage_kids, 
+  vaccination_coverage_risk,
+  vaccination_coverage_elderly,
+  age_labels
 )
 
 ## add some variation by IMD
@@ -165,9 +171,22 @@ vaccinated_pop %>%
   ggplot() + geom_line(aes(age_grp, vaccinated_population, col=imd_quintile,
                            lty = risk_level, group=interaction(imd_quintile,risk_level)))
 
-vaccinated_pop %>% 
-  ggplot() + geom_line(aes(age_grp, vaccinated_population/pop, col=imd_quintile,
-                           lty = risk_level, group=interaction(imd_quintile,risk_level)))
+vacc_plot <- vaccinated_pop %>% 
+  ggplot() +
+  geom_line(aes(x = age_grp, group = interaction(as.factor(imd_quintile), risk_level), 
+                col = as.factor(imd_quintile), y = vaccinated_population/pop), lwd = 1) +
+  geom_point(aes(x = age_grp, group = interaction(as.factor(imd_quintile), risk_level), 
+                 y = vaccinated_population/pop, shape = risk_level), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, group = interaction(as.factor(imd_quintile), risk_level), 
+                 col = as.factor(imd_quintile), y = vaccinated_population/pop, 
+                 shape = risk_level), stroke=1.5, size = 3) +
+  scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
+  scale_shape_manual(values = c(1, 2)) +
+  theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
+                    y = 'Simulated vaccination coverage',
+                    shape = 'Risk level') +
+  theme(text = element_text(size = 14)); vacc_plot
 
 vaccinated_pop %>% 
   mutate(key_group = case_when(
@@ -186,14 +205,13 @@ vaccinated_pop %>%
   scale_fill_manual(values = imd_quintile_colors) + 
   theme_bw() + labs(x = '', fill = 'IMD quintile', 
                     y = 'Simulated vaccine uptake (%)') +
-  theme(text = element_text(size = 12))
+  theme(text = element_text(size = 14))
 
-vaccinated_pop %>% 
+risk_plot <- vaccinated_pop %>% 
   ggplot() + 
   geom_line(aes(x = age_grp, group = as.factor(imd_quintile), 
                col = as.factor(imd_quintile), y = risk_proportion), lwd = 1) +
-  geom_point(aes(x = age_grp, group = as.factor(imd_quintile), 
-                 col = as.factor(imd_quintile), y = risk_proportion), 
+  geom_point(aes(x = age_grp, group = as.factor(imd_quintile), y = risk_proportion), 
              col='white', size = 3) +
   geom_point(aes(x = age_grp, group = as.factor(imd_quintile), 
                 col = as.factor(imd_quintile), y = risk_proportion), 
@@ -201,7 +219,13 @@ vaccinated_pop %>%
   scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
   theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
                     y = 'Simulated percentage in clinical risk group') +
-  theme(text = element_text(size = 14))
+  theme(text = element_text(size = 14),
+        legend.position = 'none')
+
+vacc_plot + risk_plot + plot_layout(nrow = 2, guides = 'collect')
+
+ggsave(file.path('output','figures','dummy_infections','dummy_vacc_risk_props.png'),
+       width = 10, height = 10)
 
 #### VACCINE EFFICACY ####
 ## (age-dependent, annual, eventually strain-specific)
@@ -211,22 +235,18 @@ vaccinated_pop %>%
 # 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
 # 2024/25: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#secondary-care-surveillance
 
-vaccination_efficacy_infection <- CJ(
-  age_grp = age_labels,    
-  start_of_season = years,
-  VE_INF = 0
-)
-
-children_ages <- c('0-4','5-11','12-17')
-adult_ages <- c('18-25','26-34','35-49','50-69')
-older_adult_ages <- c('70-79','80+')
-
 ## FOR NOW USING MADE UP DATA
 ## TODO UPDATE WHEN DATA AVAILABLE
-vaccination_efficacy_infection[
-  age_grp %in% children_ages, VE_INF := 0.45][
-    age_grp %in% adult_ages, VE_INF := 0.35][
-      age_grp %in% older_adult_ages, VE_INF := 0.3]
+vaccination_efficacy_infection <- cross_join(
+  data.table(age_grp = age_labels,  
+             VE_INF = fcn_assign_ages(
+               0.45, 
+               0.35,
+               0.3,
+               age_labels
+             )),
+  data.table(start_of_season = years)
+) 
 
 #### AGAINST HOSPITALISATION ####
 # 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
