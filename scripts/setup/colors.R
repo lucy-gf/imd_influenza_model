@@ -118,6 +118,14 @@ variables_and_names <- list(
 # var_cols <- c('#9B7EDE','#832161','#F7B801','#52050A','#BCD2EE','#F35B04')
 # names(var_cols) <- fitted_pars
 
+flu_strain_colors <- c('flu_a' = '#81559B', 'flu_b' = '#6699CC')#'#B2EF9B')
+flu_strain_names <- c('flu_a' = 'Flu A', 'flu_b' = 'Flu B')
+
+flu_subtype_colors <- c('flu_a_h1n1pdm09' = '#FF3C38', 'flu_a_h3n2' = '#FF8C42',
+                        'flu_a_unsubtyped' = '#A23E48', 'flu_b' = '#6699CC')
+flu_subtype_names <- c('flu_a_h1n1pdm09' = 'Flu A H1N1pmd09', 'flu_a_h3n2' = 'Flu A H3N2',
+                       'flu_a_unsubtyped' = 'Flu A Unsubtyped', 'flu_b' = 'Flu B')
+
 eng_reg_colors <- c("London"="#31688EFF", "North West" = '#CC4678FF',
                     'Yorkshire and The Humber' = '#65156EFF', "North East" = '#006837', 
                     "West Midlands" = '#F89441FF', 'East Midlands' = '#e78ac3',

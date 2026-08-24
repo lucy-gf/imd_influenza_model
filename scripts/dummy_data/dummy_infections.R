@@ -181,6 +181,20 @@ seasonal_seir_outputs[[1]] %>%
   scale_color_manual(values = imd_quintile_colors) +
   facet_grid(age_grp ~ risk_level, scales = 'free')
 
+seasonal_seir_outputs[[1]] %>% 
+  mutate(age_grp = case_when(
+    grepl('18|26|35|50', age_grp) ~ '18-69',
+    T ~ age_grp
+  )) %>% 
+  mutate(age_grp = factor(age_grp, levels = c('0-4','5-11','12-17','18-69','70-79','80+'))) %>% 
+  group_by(t, age_grp, imd_quintile) %>% 
+  summarise(inf = sum(infections), pop = sum(pop)) %>% 
+  ggplot() +
+  geom_line(aes(t, 100000*inf/pop, col = imd_quintile), lwd = 0.8) +
+  scale_color_manual(values = imd_quintile_colors) +
+  facet_wrap(age_grp ~ ., scales = 'free') + theme_bw() +
+  labs(x = 'Day of epidemic', y = 'Infections per 100,000', col = 'IMD')
+
 #### FINAL SIZE ####
 
 plot_final_size <- function(k){
