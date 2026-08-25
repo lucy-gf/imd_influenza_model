@@ -204,14 +204,3 @@ unknown_pars <- list(
 
 saveRDS(unknown_pars, .args[2])
 
-
-## TODO Code in
-## neil's data
-parameter_batch_B %>% 
-  filter(!grepl('flat',p_lbl)) %>% 
-  mutate(val = as.numeric(gsub('hosp_','',par))) %>% 
-  mutate(age = case_when(val < 15 ~ val-9, T~ val-14), 
-         risk = case_when(val < 15 ~ 'low', T~'high')) %>% 
-  ggplot() + 
-  geom_density(aes(x = value, fill = risk, col = risk), alpha = 0.5) + 
-  theme_bw() + facet_grid(age~., scales = 'free')

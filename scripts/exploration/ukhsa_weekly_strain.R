@@ -131,7 +131,8 @@ bw_plot <- function(min_year = 2021,
 
 proportion_plot <- function(min_year = 2021,
                             min_tests = 50, 
-                            all_a = F){
+                            all_a = F,
+                            title = T){
  
   if(!all_a){
     p <- ukhsa_dat %>% 
@@ -144,24 +145,26 @@ proportion_plot <- function(min_year = 2021,
                stat = 'identity', position = 'stack', width = 7) +
       scale_fill_manual(values = flu_strain_colors,
                         labels = flu_strain_names) +
-      labs(x = '', y = 'Proportion of positive tests', fill = '',
-           title = paste0('Proportion of positive tests by strain, in weeks with at least ', min_tests, ' tests')) +
-      theme_bw()
+      labs(x = '', y = 'Proportion of positive tests', fill = '') +
+      theme_bw(); p
   }else{
     p <- ukhsa_dat %>% 
       filter(year(date_formatted) >= min_year,
              flu_tot >= min_tests) %>% 
       select(date_formatted, starts_with('flu_')) %>% 
       select(!c(flu_a)) %>% 
-      pivot_longer(! c(date_formatted, flu_tot)) %>% 
+      pivot_longer(! c(date_formatted, flu_tot)) %>%
       ggplot() + 
       geom_bar(aes(date_formatted, value/flu_tot, fill = name, group = name),
                stat = 'identity', position = 'stack', width = 7) +
       scale_fill_manual(values = flu_subtype_colors,
                         labels = flu_subtype_names) +
-      labs(x = '', y = 'Proportion of positive tests', fill = '',
-           title = paste0('Proportion of positive tests by subtype, in weeks with at least ', min_tests, ' tests')) +
-      theme_bw()
+      labs(x = '', y = 'Proportion of positive tests', fill = '') +
+      theme_bw(); p
+  }
+  
+  if(title){
+    p <- p + labs(title = paste0('Proportion of positive tests by subtype, in weeks with at least ', min_tests, ' tests'))
   }
   
   p 
@@ -190,13 +193,13 @@ ggsave(gsub('.png', '_proportion.png', .args[2]), width = width_val + 3, height 
 bw_plot() + theme(axis.title.x=element_blank(),
                   axis.text.x=element_blank(),
                   axis.ticks.x=element_blank()) + 
-  proportion_plot() + theme(title=element_blank()) + plot_layout(nrow = 2, heights = c(1,9))
+  proportion_plot(title = F) + plot_layout(nrow = 2, heights = c(1,9))
 ggsave(gsub('.png', '_proportion_A_B.png', .args[2]), width = width_val + 1, height = height_val - 2)
 
 bw_plot() + theme(axis.title.x=element_blank(),
                   axis.text.x=element_blank(),
                   axis.ticks.x=element_blank()) + 
-  proportion_plot(all_a = T) + theme(title=element_blank()) + plot_layout(nrow = 2, heights = c(1,9))
+  proportion_plot(all_a = T, title = F) + plot_layout(nrow = 2, heights = c(1,9))
 ggsave(gsub('.png', '_proportion_A_ALL_B.png', .args[2]), width = width_val + 2, height = height_val - 2)
 
 #### AGE GROUPED #############
