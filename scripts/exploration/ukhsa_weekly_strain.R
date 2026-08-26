@@ -12,7 +12,7 @@ options(dplyr.summarise.inform = FALSE)
 
 .args <- if (interactive()) c(
   file.path("data", "ukhsa", "annual_influenza_2025_2026.ods"),
-  file.path("output", "figures", "exploration", "ukhsa_weekly_strain.png")
+  file.path("output", "figures", "exploration", "ukhsa", "ukhsa_weekly_strain.png")
 ) else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
@@ -55,8 +55,8 @@ stacked_plot <- function(min_year = 2021,
       ggplot() + 
       geom_bar(aes(date_formatted, value, fill = name),
                stat = 'identity', position = 'stack', width = 7) +
-      scale_fill_manual(values = flu_strain_colors,
-                        labels = flu_strain_names) +
+      scale_fill_manual(values = flu_subtype_colors,
+                        labels = flu_subtype_names) +
       labs(x = '', y = 'Positive tests', fill = '') +
       theme_bw()
   }else{
@@ -86,28 +86,34 @@ absolute_plot <- function(min_year = 2021,
       filter(year(date_formatted) >= min_year) %>% 
       select(date_formatted, flu_a, flu_b) %>% 
       pivot_longer(!date_formatted) %>% 
+      group_by(date_formatted) %>% mutate(TOTPOS = sum(value)) %>% 
       ggplot() + 
-      geom_line(aes(date_formatted, value, col = name, group = name),
-                lwd = 0.8) +
-      scale_color_manual(values = flu_strain_colors,
-                         labels = flu_strain_names) +
-      scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
-      labs(x = '', y = 'Positive tests', col = '') +
-      theme_bw()
-  }else{
-    p <- ukhsa_dat %>% 
-      filter(year(date_formatted) >= min_year) %>% 
-      select(date_formatted, starts_with('flu_')) %>% 
-      select(!c(flu_a, flu_tot)) %>% 
-      pivot_longer(!date_formatted) %>% 
-      ggplot() + 
+      geom_line(aes(date_formatted, TOTPOS),
+                lwd = 0.6, lty = 2) +
       geom_line(aes(date_formatted, value, col = name, group = name),
                 lwd = 0.8) +
       scale_color_manual(values = flu_subtype_colors,
                          labels = flu_subtype_names) +
       scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
       labs(x = '', y = 'Positive tests', col = '') +
-      theme_bw()
+      theme_bw(); p
+  }else{
+    p <- ukhsa_dat %>% 
+      filter(year(date_formatted) >= min_year) %>% 
+      select(date_formatted, starts_with('flu_')) %>% 
+      select(!c(flu_a, flu_tot)) %>% 
+      pivot_longer(!date_formatted) %>% 
+      group_by(date_formatted) %>% mutate(TOTPOS = sum(value)) %>% 
+      ggplot() + 
+      geom_line(aes(date_formatted, TOTPOS),
+                lwd = 0.6, lty = 2) +
+      geom_line(aes(date_formatted, value, col = name, group = name),
+                lwd = 0.8) +
+      scale_color_manual(values = flu_subtype_colors,
+                         labels = flu_subtype_names) +
+      scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+      labs(x = '', y = 'Positive tests', col = '') +
+      theme_bw(); p
   }
   
   p
@@ -143,8 +149,8 @@ proportion_plot <- function(min_year = 2021,
       ggplot() + 
       geom_bar(aes(date_formatted, value/flu_tot, fill = name, group = name),
                stat = 'identity', position = 'stack', width = 7) +
-      scale_fill_manual(values = flu_strain_colors,
-                        labels = flu_strain_names) +
+      scale_fill_manual(values = flu_subtype_colors,
+                        labels = flu_subtype_names) +
       labs(x = '', y = 'Proportion of positive tests', fill = '') +
       theme_bw(); p
   }else{
@@ -263,8 +269,8 @@ proportion_plot_age <- function(min_year = 2021,
       ggplot() + 
       geom_bar(aes(date_formatted, value/flu_tot, fill = name, group = name),
                stat = 'identity', position = 'stack', width = 7) +
-      scale_fill_manual(values = flu_strain_colors,
-                        labels = flu_strain_names) +
+      scale_fill_manual(values = flu_subtype_colors,
+                        labels = flu_subtype_names) +
       facet_wrap(age_group ~ .) + 
       labs(x = '', y = 'Proportion of positive tests', fill = '',
            title = paste0('Proportion of positive tests by strain (2024-2026)')) +
@@ -313,8 +319,8 @@ p2425 <- ukhsa_dat_age_2425 %>%
   ggplot() + 
   geom_bar(aes(x = age_group, y = value, fill = name),
            position = 'fill', stat = 'identity') +
-  scale_fill_manual(values = flu_strain_colors,
-                    labels = flu_strain_names) +
+  scale_fill_manual(values = flu_subtype_colors,
+                    labels = flu_subtype_names) +
   labs(x = '', y = 'Proportion of positive tests', fill = '',
        title = '2024 - 2025') +
   theme_bw()

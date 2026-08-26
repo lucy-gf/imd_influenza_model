@@ -13,7 +13,7 @@ options(scipen = 9999)
 
 .args <- if (interactive()) c(
   file.path("data", "ukhsa", "parameter_batch_AH1N1.rds"),
-  file.path("output", "figures", "exploration", "ukhsa_IHR_strain.png")
+  file.path("output", "figures", "exploration", "ukhsa", "ukhsa_IHR_strain.png")
 ) else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
