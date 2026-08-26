@@ -76,31 +76,40 @@ unknown_pars <- readRDS(.args[4])
 
 ## check R0
 cat('\n')
+R0_vec <- c(); Reff_vec <- c()
 for(i in 1:length(years)){
-  pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
-  cat('R0 = ', R0_func(pars$susceptibility,
-                pars$infectious_period,
-                pars$transmissibility,
-                cm), '\n', sep = '')
+  for(j in c("A", "B")){
+    cat(years[i], ', ', j, ': ', sep = '')
+    
+    v_p <- vaccinated_data %>%
+      filter(start_of_season == years[i]) %>%
+      group_by(age_grp, imd_quintile) %>% 
+      summarise(effectively_vaccinated_population = sum(effectively_vaccinated_population), 
+                pop = sum(pop)) %>% ungroup() %>% 
+      mutate(eff_v_p = effectively_vaccinated_population/pop) %>% 
+      arrange(imd_quintile, age_grp) 
+    
+    pars <- unknown_pars[[paste0('epid_parameters_s', i, '_', j)]]
+    R0 <- R0_func(pars$susceptibility,
+                  pars$infectious_period,
+                  pars$transmissibility,
+                  cm)
+    Reff <- R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
+                    pars$infectious_period,
+                    pars$transmissibility,
+                    cm)
+    cat('R0 = ', round(R0,3), ', ',
+        'Reff = ', round(Reff,3),
+        '\n', sep = '')
+    
+    R0_vec <- c(R0_vec, R0); Reff_vec <- c(Reff_vec, Reff)
+  }
 }
-## check Reff
-cat('\n')
-for(i in 1:length(years)){
-  v_p <- vaccinated_data %>%
-    filter(start_of_season == years[i]) %>%
-    group_by(age_grp, imd_quintile) %>% 
-    summarise(effectively_vaccinated_population = sum(effectively_vaccinated_population), 
-              pop = sum(pop)) %>% ungroup() %>% 
-    mutate(eff_v_p = effectively_vaccinated_population/pop) %>% 
-    arrange(imd_quintile, age_grp) 
-  
-  pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
-  cat('Reff = ', R0_func((1 - v_p$eff_v_p)*rep(pars$susceptibility, 5),
-                       pars$infectious_period,
-                       pars$transmissibility,
-                       cm), '\n', sep = '')
-}
-cat('\n')
+
+R_dat <- data.table(
+  CJ(year = years, strain = c("A", "B")),
+  R0 = R0_vec, Reff = Reff_vec
+)
 
 #### EXPAND CONTACT MATRIX ####
 
@@ -125,53 +134,67 @@ seasonal_seir_outputs <- list()
 
 for(i in 1:length(years)){
   
-  vaccinated_pop_seasonal <- vaccinated_data %>% 
-    filter(start_of_season == years[i]) %>% 
-    arrange(start_of_season, desc(risk_level), imd_quintile, age_grp)
-  
-  ## should be ordered by IMD then age
-  if(vaccinated_pop_seasonal$imd_quintile[2] != 1){warning('vaccinated_data in wrong order')}
-  if(vaccinated_pop_seasonal$age_grp[2] != age_labels[2]){warning('vaccinated_data in wrong order')}
-  
-  # population sizes (done here as may become season-specific)
-  pop_stratified <- vaccinated_pop_seasonal$pop 
-  pop_vaccinated <- vaccinated_pop_seasonal$vaccinated_population
-  VE_INF <- vaccinated_pop_seasonal$VE_INF
-  
-  tot_pop <- sum(imd_age_pop$pop)
-  if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
-  
-  pars <- unknown_pars[[paste0('epid_parameters_s', i)]]
-  
-  init_infected_num <- pars$init_infected
-  init_infected_vec <- (pop_stratified - pop_vaccinated)*init_infected_num/(tot_pop-sum(pop_vaccinated))
-  if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
-  
-  time_series <- run_model(
-    pop = pop_stratified,
-    I0 = init_infected_vec,
-    vacc_cov = pop_vaccinated,
-    ve_inf = VE_INF,
-    cm = pc_cm,
-    trans = pars$transmissibility,
-    susc = pars$susceptibility,
-    lat_per = pars$latent_period,
-    inf_per = pars$infectious_period
+  for(j in unique(vaccinated_data$strain)){
+    
+    list_number <- 2*i + (j == 'B') - 1
+    
+    vaccinated_pop_seasonal <- vaccinated_data %>% 
+      filter(start_of_season == years[i],
+             strain == j) %>% 
+      arrange(start_of_season, desc(risk_level), imd_quintile, age_grp)
+    
+    ## should be ordered by IMD then age
+    if(vaccinated_pop_seasonal$imd_quintile[2] != 1){warning('vaccinated_data in wrong order')}
+    if(vaccinated_pop_seasonal$age_grp[2] != age_labels[2]){warning('vaccinated_data in wrong order')}
+    
+    # population sizes (done here as may become season-specific)
+    pop_stratified <- vaccinated_pop_seasonal$pop 
+    pop_vaccinated <- vaccinated_pop_seasonal$vaccinated_population
+    VE_INF <- vaccinated_pop_seasonal$VE_INF
+    
+    tot_pop <- sum(imd_age_pop$pop)
+    if(!all.equal(sum(pop_stratified), tot_pop)){warning('pop not adding up')}
+    
+    pars <- unknown_pars[[paste0('epid_parameters_s', i, '_', j)]]
+    
+    init_infected_num <- pars$init_infected
+    init_infected_vec <- (pop_stratified - pop_vaccinated)*init_infected_num/(tot_pop-sum(pop_vaccinated))
+    if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
+    
+    time_series <- run_model(
+      pop = pop_stratified,
+      I0 = init_infected_vec,
+      vacc_cov = pop_vaccinated,
+      ve_inf = VE_INF,
+      cm = pc_cm,
+      trans = pars$transmissibility,
+      susc = pars$susceptibility,
+      lat_per = pars$latent_period,
+      inf_per = pars$infectious_period
     ) 
     
-  time_series <- time_series[vaccinated_pop_seasonal %>% mutate(imd_quintile=as.character(imd_quintile)) %>% 
-                               select(age_grp, imd_quintile, risk_level, pop),
-                             on = c('age_grp','imd_quintile','risk_level')]
-  
-  time_series[, start_date := pars$start_date]
-  
-  time_series <- time_series[t %in% 0:365] ## take data from the start of each day
-  
-  seasonal_seir_outputs[[i]] <- time_series
+    time_series <- time_series[vaccinated_pop_seasonal %>% mutate(imd_quintile=as.character(imd_quintile)) %>% 
+                                 select(age_grp, imd_quintile, risk_level, pop),
+                               on = c('age_grp','imd_quintile','risk_level')]
+    
+    time_series[, start_date := pars$start_date]
+    time_series[, strain := j]
+    
+    time_series <- time_series[t %in% 0:365] ## take data from the start of each day
+    
+    seasonal_seir_outputs[[list_number]] <- time_series
+    
+  }
   
 }
 
-names(seasonal_seir_outputs) <- years
+seasonal_seir_outputs_names <- c()
+for(k in 1:length(seasonal_seir_outputs)){
+  seasonal_seir_outputs_names <- c(seasonal_seir_outputs_names,
+                                   paste0(year(seasonal_seir_outputs[[k]]$start_date[1]),
+                                          ' (', seasonal_seir_outputs[[k]]$strain[1], ')'))
+}
+names(seasonal_seir_outputs) <- seasonal_seir_outputs_names
 
 #### PLOT EXAMPLES ####
   
@@ -214,9 +237,73 @@ plot_final_size <- function(k){
 
 }
 
-final_size_plots <- map(.x = 1:length(years), .f = plot_final_size)
+final_size_plots <- map(.x = 1:length(seasonal_seir_outputs), .f = plot_final_size)
 
 patchwork::wrap_plots(final_size_plots, nrow = 3)
+
+#### FLU WEEKLY PROPORTIONS ####
+
+plot_weekly_props <- function(year_i){
+  
+  rbindlist(seasonal_seir_outputs, idcol = "id") %>% 
+    filter(substr(id, 1, 4) == as.character(year_i)) %>% 
+    group_by(t, age_grp, strain) %>% 
+    summarise(infections = sum(infections), 
+              pop = sum(pop)) %>% 
+    ggplot() + 
+    geom_bar(aes(x = t, y = infections/pop, 
+                 fill = strain),
+             stat = 'identity', position = 'stack', width = 1) + 
+    theme_bw() + 
+    scale_fill_manual(values = strain_colors, labels = strain_names) +
+    facet_wrap(.~age_grp) +
+    labs(x = 'Day of epidemic', y = 'Infected proportion', fill = '',
+         title = year_i,
+         subtitle = paste0(
+           'R0 A = ', round(R_dat[year==year_i]$R0[1], 2),
+           ', R0 B = ', round(R_dat[year==year_i]$R0[2], 2),
+           ', Reff A = ', round(R_dat[year==year_i]$Reff[1], 2),
+           ', Reff B = ', round(R_dat[year==year_i]$Reff[2], 2)))
+
+ }
+
+weekly_prop_plots <- map(.x = years, .f = plot_weekly_props)
+
+patchwork::wrap_plots(weekly_prop_plots, nrow = 3)
+
+ggsave(file.path("output", "figures", "dummy_infections", "dummy_infections.png"),
+       height = 12, width = 9)
+
+plot_weekly_props_FILT <- function(year_i){
+  
+  rbindlist(seasonal_seir_outputs, idcol = "id") %>% 
+    filter(substr(id, 1, 4) == as.character(year_i)) %>% 
+    group_by(t, age_grp, strain) %>% 
+    summarise(infections = sum(infections), 
+              pop = sum(pop)) %>% 
+    ggplot() + 
+    geom_bar(aes(x = t, y = infections/pop, 
+                 fill = strain),
+             stat = 'identity', position = 'stack', width = 1) + 
+    theme_bw() + 
+    scale_fill_manual(values = strain_colors, labels = strain_names) +
+    facet_wrap(.~age_grp) +
+    labs(x = 'Day of epidemic', y = 'Infected proportion', fill = '',
+         # title = year_i,
+         subtitle = paste0(
+           # 'R0 A = ', round(R_dat[year==year_i]$R0[1], 2),
+           # ', R0 B = ', round(R_dat[year==year_i]$R0[2], 2),
+           'Reff A = ', round(R_dat[year==year_i]$Reff[1], 2),
+           ', Reff B = ', round(R_dat[year==year_i]$Reff[2], 2)))
+  
+}
+
+weekly_prop_plots <- map(.x = c(2023, 2025), .f = plot_weekly_props_FILT)
+
+patchwork::wrap_plots(weekly_prop_plots, nrow = 2)
+
+ggsave(file.path("output", "figures", "dummy_infections", "dummy_infections_FILT.png"),
+       height = 12, width = 9)
 
 #### SAVE DUMMY DATA ####
 

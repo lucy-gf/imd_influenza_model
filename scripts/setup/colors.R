@@ -120,6 +120,8 @@ variables_and_names <- list(
 
 flu_strain_colors <- c('flu_a' = '#81559B', 'flu_b' = '#6699CC')#'#B2EF9B')
 flu_strain_names <- c('flu_a' = 'Flu A', 'flu_b' = 'Flu B')
+strain_colors <- c('A' = '#81559B', 'B' = '#6699CC')
+strain_names <- c('A' = 'Flu A', 'B' = 'Flu B')
 
 flu_subtype_colors <- c('flu_a' = '#81559B', 'flu_a_h1n1pdm09' = '#FF3C38', 'flu_a_h3n2' = '#FF8C42',
                         'flu_a_unsubtyped' = '#A23E48', 'flu_b' = '#6699CC')
@@ -127,6 +129,8 @@ flu_subtype_names <- c('flu_a' = 'Flu A', 'flu_a_h1n1pdm09' = 'Flu A H1N1pmd09',
                        'flu_a_unsubtyped' = 'Flu A Unsubtyped', 'flu_b' = 'Flu B')
 
 risk_colors <- c('low_risk' = '#D90368', 'high_risk' = '#F75C03')
+
+season_colors <- c('2023' = '#5D576B', '2024' = '#99E1D9', '2025' = '#F7567C')
 
 eng_reg_colors <- c("London"="#31688EFF", "North West" = '#CC4678FF',
                     'Yorkshire and The Humber' = '#65156EFF', "North East" = '#006837', 

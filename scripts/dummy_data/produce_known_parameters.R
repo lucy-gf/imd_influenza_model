@@ -4,6 +4,7 @@
 suppressMessages(require(ggplot2))
 suppressMessages(require(patchwork))
 suppressMessages(require(tidyverse))
+suppressMessages(require(readODS))
 suppressMessages(require(data.table))
 suppressMessages(require(readr))
 options(dplyr.summarise.inform = FALSE) 
@@ -113,8 +114,10 @@ risk_group_pop <- data.frame(risk_proportion = risk_group_imd_variation) %>%
   arrange(imd_quintile, age_grp)
 
 risk_group_pop %>% 
-  ggplot() + geom_line(aes(age_grp, risk_population, col=imd_quintile,
-                           group=imd_quintile))
+  ggplot() + geom_line(aes(age_grp, risk_population, col=as.factor(imd_quintile),
+                           group=imd_quintile), lwd = 0.8) + 
+  scale_color_manual(values = imd_quintile_colors) + theme_bw() + 
+  labs(x = '', y = 'Proportion in risk group', col = 'IMD')
 
 risk_group_pop %>% 
   ggplot() + geom_line(aes(age_grp, risk_proportion, col=as.factor(imd_quintile),
@@ -237,7 +240,8 @@ ggsave(file.path('output','figures','dummy_infections','dummy_vacc_risk_props.pn
 
 ## FOR NOW USING MADE UP DATA
 ## TODO UPDATE WHEN DATA AVAILABLE
-vaccination_efficacy_infection <- cross_join(
+
+vaccination_efficacy_infection_A <- cross_join(
   data.table(age_grp = age_labels,  
              VE_INF = fcn_assign_ages(
                0.45, 
@@ -245,44 +249,119 @@ vaccination_efficacy_infection <- cross_join(
                0.3,
                age_labels
              )),
-  data.table(start_of_season = years)
+  data.table(start_of_season = years, strain = "A")
 ) 
+
+vaccination_efficacy_infection_B <- cross_join(
+  data.table(age_grp = age_labels,  
+             VE_INF = fcn_assign_ages(
+               0.45, 
+               0.35,
+               0.3,
+               age_labels
+             )),
+  data.table(start_of_season = years, strain = "B")
+) 
+
+vaccination_efficacy_infection <- rbind(
+  vaccination_efficacy_infection_A,
+  vaccination_efficacy_infection_B
+)
 
 #### AGAINST HOSPITALISATION ####
 # 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
 # 2024/25: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#secondary-care-surveillance
  
-vaccination_efficacy_hospitalisation <- CJ(
-  age_grp = age_labels,    
-  start_of_season = years,
-  VE_HOSP = 0
-)
+# from: https://doi.org/10.1111/irv.70194
 
-children_ages <- c('0-4','5-11','12-17')
-adult_ages <- c('18-25','26-34','35-49','50-69')
-older_adult_ages <- c('70-79','80+')
+VE_2_17_A_2022_2023 <- 0.60
+VE_2_17_A_2023_2024 <- 0.50
+VE_2_17_B_2022_2023 <- 0.87
+VE_2_17_B_2023_2024 <- 0.84
+VE_18_64_A_2022_2023 <- 0.28
+VE_18_64_A_2023_2024 <- 0.34
+VE_18_64_B_2022_2023 <- 0.53
+VE_18_64_B_2023_2024 <- 0.70
+VE_65_A_2022_2023 <- 0.25
+VE_65_A_2023_2024 <- 0.17
+VE_65_B_2022_2023 <- 0.28
+VE_65_B_2023_2024 <- 0.39
 
-vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2023, VE_HOSP := 0.56][
-  age_grp %in% adult_ages & start_of_season == 2023, VE_HOSP := 0.38][
-  age_grp %in% older_adult_ages & start_of_season == 2023, VE_HOSP := 0.18]
+# from: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#vaccination
+# (Figure 56)
 
-vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2024, VE_HOSP := 0.62][
-  age_grp %in% adult_ages & start_of_season == 2024, VE_HOSP := 0.46][
-  age_grp %in% older_adult_ages & start_of_season == 2024, VE_HOSP := 0.40]
+ukhsa_dat_2024_25 <- read_ods(file.path("data","ukhsa","annual_influenza_2024_2025.ods"),
+                              sheet = 59, skip = 3)
+colnames(ukhsa_dat_2024_25) <- c('age_group','flu_subtype','NA1','NA2','NA3','NA4','VE','VE_CIL','VE_CIU')
+ukhsa_dat_2024_25 <- ukhsa_dat_2024_25 %>% mutate(VE = VE/100)
 
-# for now, use 2024/25 values for 2025/26
-vaccination_efficacy_hospitalisation[
-  age_grp %in% children_ages & start_of_season == 2025, VE_HOSP := 0.62][
-  age_grp %in% adult_ages & start_of_season == 2025, VE_HOSP := 0.46][
-  age_grp %in% older_adult_ages & start_of_season == 2025, VE_HOSP := 0.40]
+VE_2_17_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'Any Influenza A'))$VE
+VE_2_17_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'Influenza B'))$VE
+VE_18_64_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'Any Influenza A'))$VE
+VE_18_64_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'Influenza B'))$VE
+VE_65_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'Any Influenza A'))$VE
+VE_65_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'Influenza B'))$VE
+
+# from: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026#vaccination
+# (Figure 56)
+
+ukhsa_dat_2025_26 <- read_ods(file.path("data","ukhsa","annual_influenza_2025_2026.ods"),
+                              sheet = 59, skip = 3)
+colnames(ukhsa_dat_2025_26) <- c('age_group','flu_subtype','NA1','NA2','NA3','NA4','VE')
+ukhsa_dat_2025_26 <- ukhsa_dat_2025_26 %>% 
+  mutate(VE = as.numeric(sub("%.*", "", VE))/100,
+         flu_subtype = gsub(substr(ukhsa_dat_2025_26$flu_subtype[2], 4, 4), '', flu_subtype))
+
+VE_2_17_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_2_17_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'InfluenzaB'))$VE
+VE_18_64_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_18_64_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'InfluenzaB'))$VE
+VE_65_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_65_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'InfluenzaB'))$VE
+
+vaccination_efficacy_hospitalisation <- CJ(strain = c('A','B'),
+                                           start_of_season = years,
+                                           age_grp = age_labels,
+                                           VE_HOSP = 0)
+
+for(strain_i in c('A','B')){
+  for(season_i in years){
+    vaccination_efficacy_hospitalisation[
+      strain == strain_i & start_of_season == season_i, 
+      VE_HOSP := fcn_assign_ages(
+      get(paste0('VE_2_17_', strain_i, '_', season_i, '_', season_i + 1)), 
+      get(paste0('VE_18_64_', strain_i, '_', season_i, '_', season_i + 1)),
+      get(paste0('VE_65_', strain_i, '_', season_i, '_', season_i + 1)),
+      age_labels
+    )]
+  }
+}
+
+vaccination_efficacy_hospitalisation %>% 
+  ggplot() + 
+  geom_line(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain),
+                col = as.factor(start_of_season)), lwd = 1) +
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain)), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain),
+                 col = as.factor(start_of_season), shape = strain), 
+             stroke=1.5, size = 3) +
+  scale_shape_manual(values = c(1, 2)) +
+  scale_color_manual(values = season_colors) +
+  theme_bw() + labs(x = 'Age group', col = 'Season start',
+                    y = 'VE against hospitalisation') +
+  facet_grid(strain ~.) + 
+  theme(text = element_text(size = 14))
+
+ggsave(file.path('output','figures','dummy_infections','ukhsa_ve_hospitalisation.png'),
+       width = 10, height = 8)
 
 ## join together with vaccination coverage data
 
-vaccinated_data <- vaccinated_pop %>% 
-  left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season')) %>% 
-  left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season')) %>% 
+vaccinated_data <- rbind(vaccinated_pop %>% mutate(strain = 'A'),
+                         vaccinated_pop %>% mutate(strain = 'B')) %>% 
+  left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season', 'strain')) %>% 
+  left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season', 'strain')) %>% 
   mutate(effectively_vaccinated_population = round(VE_INF*vaccinated_population))
 
 #### EPI PERIODS ####

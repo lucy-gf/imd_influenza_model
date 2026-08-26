@@ -61,57 +61,97 @@ years <- 2023:2025 # 2023-24 to 2025-26
 
 epid_periods <- c(2, 3) # latent and infectious periods
 
-susceptibility_matrix <- CJ(
-  year = years,
-  broad_age = c('children','adults','older_adults'),
-  susceptibility = 0
+susceptibility_long <- cross_join(
+  CJ(year = years, strain = c("A","B")),
+  data.table(age_grp = age_labels, 
+             broad_age = fcn_assign_ages('children','adults','older_adults', age_labels),
+             susceptibility = fcn_assign_ages(0.6, 0.3, 0.45, age_labels))
 )
-susceptibility_matrix[broad_age == 'children', susceptibility := 0.6]
-susceptibility_matrix[broad_age == 'adults', susceptibility := 0.3]
-susceptibility_matrix[broad_age == 'older_adults', susceptibility := 0.45]
-susceptibility_matrix[year == 2023, susceptibility := susceptibility*(0.95)]
-susceptibility_matrix[year == 2023 & broad_age == 'children', susceptibility := susceptibility*(1.01)]
-susceptibility_matrix[year == 2024, susceptibility := susceptibility*(1.05)]
-susceptibility_matrix[year == 2023 & broad_age == 'older_adults', susceptibility := susceptibility*(1.01)]
-susceptibility_matrix[year == 2025, susceptibility := susceptibility*(1.01)]
-susceptibility_matrix[year == 2023 & broad_age == 'children', susceptibility := susceptibility*(0.98)]
-if(nrow(susceptibility_matrix[susceptibility<0])>0){stop('Negative susceptibility')}
+susceptibility_long[year == 2023, susceptibility := susceptibility*(0.95)]
+susceptibility_long[year == 2023 & broad_age == 'children', susceptibility := susceptibility*(1.01)]
+susceptibility_long[year == 2023 & broad_age == 'older_adults', susceptibility := susceptibility*(0.96)]
+susceptibility_long[year == 2024, susceptibility := susceptibility*(1.05)]
+susceptibility_long[year == 2024 & broad_age == 'older_adults', susceptibility := susceptibility*(1.02)]
+susceptibility_long[year == 2025, susceptibility := susceptibility*(1.01)]
+susceptibility_long[year == 2025 & broad_age == 'children', susceptibility := susceptibility*(0.98)]
+susceptibility_long[strain == 'B', susceptibility := susceptibility*(0.5)]
+susceptibility_long[strain == 'B' & broad_age == 'older_adults', susceptibility := susceptibility*(0.8)]
+if(nrow(susceptibility_long[susceptibility<0])>0){stop('Negative susceptibility')}
 
 ## make adults' susceptibility 1, everything else relative
-susceptibility_adults <- susceptibility_matrix[broad_age=='adults']
+susceptibility_adults <- susceptibility_long[broad_age=='adults']
 setnames(susceptibility_adults,'susceptibility','adults_val')
-susceptibility_adults[, broad_age := NULL]
-susceptibility_matrix <- susceptibility_matrix[susceptibility_adults, on = c('year')]
-susceptibility_matrix[, susceptibility := susceptibility/adults_val]
-susceptibility_matrix[, adults_val := NULL]
-
-## turn into age groups
-susceptibility_long <- cross_join(susceptibility_matrix, broad_ages_susc)[broad_age.x==broad_age.y]
-susceptibility_long[, c('broad_age.x','broad_age.y') := NULL]
+susceptibility_adults[, c('broad_age', 'age_grp') := NULL]
+susceptibility_long <- susceptibility_long[unique(susceptibility_adults), on = c('year', 'strain')]
+susceptibility_long[, susceptibility := susceptibility/adults_val]
+susceptibility_long[, c('broad_age','adults_val') := NULL]
 susceptibility_long$age_grp <- factor(susceptibility_long$age_grp, levels = age_labels)
-setorder(susceptibility_long, year, age_grp)
+setorder(susceptibility_long, year, strain, age_grp)
 
-epid_parameters_s1 <- list(
-  susceptibility = susceptibility_long[year==years[1]]$susceptibility, # currently not age-dependent, one for each season
-  transmissibility = 0.04,
+susceptibility_long %>% 
+  ggplot() + 
+  geom_line(aes(x = age_grp, y = susceptibility, group = interaction(year, strain),
+                col = as.factor(year)), lwd = 1) +
+  geom_point(aes(x = age_grp, y = susceptibility, group = interaction(year, strain)), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, y = susceptibility, group = interaction(year, strain),
+                 col = as.factor(year), shape = strain), 
+             stroke=1.5, size = 3) +
+  scale_shape_manual(values = c(1, 2)) +
+  scale_color_manual(values = season_colors) +
+  theme_bw() + labs(x = 'Age group', col = 'Season start',
+                    y = 'VE against hospitalisation') +
+  facet_grid(strain ~.) + 
+  theme(text = element_text(size = 14))
+
+epid_parameters_s1_A <- list(
+  susceptibility = susceptibility_long[year==years[1] & strain == "A"]$susceptibility, 
+  transmissibility = 0.041,
   latent_period = epid_periods[1],
   infectious_period = epid_periods[2],
   start_date = as.Date(paste0('01-09-', years[1]), "%d-%m-%Y"),
   init_infected = 300
 )
 
-epid_parameters_s2 <- list(
-  susceptibility = susceptibility_long[year==years[2]]$susceptibility, # currently not age-dependent, one for each season
-  transmissibility = 0.045,
+epid_parameters_s1_B <- list(
+  susceptibility = susceptibility_long[year==years[1] & strain == "B"]$susceptibility, 
+  transmissibility = 0.039,
+  latent_period = epid_periods[1],
+  infectious_period = epid_periods[2],
+  start_date = as.Date(paste0('01-09-', years[1]), "%d-%m-%Y"),
+  init_infected = 300
+)
+
+epid_parameters_s2_A <- list(
+  susceptibility = susceptibility_long[year==years[2] & strain == "A"]$susceptibility, 
+  transmissibility = 0.041,
   latent_period = epid_periods[1],
   infectious_period = epid_periods[2],
   start_date = as.Date(paste0('01-09-', years[2]), "%d-%m-%Y"),
   init_infected = 400
 )
 
-epid_parameters_s3 <- list(
-  susceptibility = susceptibility_long[year==years[3]]$susceptibility, # currently not age-dependent, one for each season
+epid_parameters_s2_B <- list(
+  susceptibility = susceptibility_long[year==years[2] & strain == "B"]$susceptibility, 
+  transmissibility = 0.036,
+  latent_period = epid_periods[1],
+  infectious_period = epid_periods[2],
+  start_date = as.Date(paste0('01-09-', years[2]), "%d-%m-%Y"),
+  init_infected = 400
+)
+
+epid_parameters_s3_A <- list(
+  susceptibility = susceptibility_long[year==years[3] & strain == "A"]$susceptibility, 
   transmissibility = 0.041,
+  latent_period = epid_periods[1],
+  infectious_period = epid_periods[2],
+  start_date = as.Date(paste0('01-09-', years[3]), "%d-%m-%Y"),
+  init_infected = 200
+)
+
+epid_parameters_s3_B <- list(
+  susceptibility = susceptibility_long[year==years[3] & strain == "B"]$susceptibility, 
+  transmissibility = 0.033,
   latent_period = epid_periods[1],
   infectious_period = epid_periods[2],
   start_date = as.Date(paste0('01-09-', years[3]), "%d-%m-%Y"),
@@ -120,7 +160,7 @@ epid_parameters_s3 <- list(
 
 #### REPORTING RATES ####
 
-# TODO for now these are the same in each season
+# TODO for now these are the same in each season and for each strain
 
 gp_rate <- c(1, 0.1, 2, 5, 3, 6)/20
 hosp_rate <- c(2, 0.1, 2, 8, 3, 15)/100
@@ -191,9 +231,12 @@ ggsave(file.path('output','figures','dummy_infections','reporting_rates.png'), w
 #### MAKE INTO LIST ####
 
 unknown_pars <- list(
-  epid_parameters_s1 = epid_parameters_s1,
-  epid_parameters_s2 = epid_parameters_s2,
-  epid_parameters_s3 = epid_parameters_s3,
+  epid_parameters_s1_A = epid_parameters_s1_A,
+  epid_parameters_s2_A = epid_parameters_s2_A,
+  epid_parameters_s3_A = epid_parameters_s3_A,
+  epid_parameters_s1_B = epid_parameters_s1_B,
+  epid_parameters_s2_B = epid_parameters_s2_B,
+  epid_parameters_s3_B = epid_parameters_s3_B,
   care_rates = care_rate_imd_df,
   imd_spline_pars = imd_spline_pars,
   primary_care_rates = gp_rate,
