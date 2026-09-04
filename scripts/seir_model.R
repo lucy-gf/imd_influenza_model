@@ -23,6 +23,9 @@ run_model <- function(
     susc <- rep(susc, dim(cm)[1]/length(susc))
   }
   
+  # absolute proportions of subpopulations susceptible
+  if(sum(susc > 1) > 0){stop('Some susceptibility more than 100%')}
+  
   # call C++ solver
   raw <- run_seir_cpp(
     pop     = pop,

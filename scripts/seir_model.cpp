@@ -26,19 +26,19 @@ NumericMatrix run_seir_cpp(
   NumericVector S(ng), E1(ng), E2(ng), I1(ng), I2(ng), R(ng), V(ng), cumI(ng);
   NumericVector Sv(ng), E1v(ng), E2v(ng), I1v(ng), I2v(ng), Rv(ng), cumIv(ng);
   for (int i = 0; i < ng; i++) {
-    S[i]    = pop[i] - vacc_cov[i] - I0[i];
+    S[i]    = ((pop[i] - vacc_cov[i]) * susc[i]) - I0[i];
     E1[i]   = 0.0;
     E2[i]   = 0.0;
     I1[i]   = I0[i];
     I2[i]   = 0.0;
-    R[i]    = 0.0;
-    Sv[i]    = (1 - ve_inf[i])*vacc_cov[i];
+    R[i]    = (pop[i] - vacc_cov[i]) * (1 - susc[i]);
+    Sv[i]    = (1 - ve_inf[i]) * vacc_cov[i] * susc[i];
     E1v[i]   = 0.0;
     E2v[i]   = 0.0;
     I1v[i]   = 0.0;
     I2v[i]   = 0.0;
-    Rv[i]    = 0.0;
-    V[i]    = ve_inf[i]*vacc_cov[i]; // those effectively vaccinated
+    Rv[i]    = (1 - ve_inf[i]) * vacc_cov[i] * (1 - susc[i]);
+    V[i]    = ve_inf[i] * vacc_cov[i]; // those effectively vaccinated
     cumI[i] = 0.0;
     cumIv[i] = 0.0;
   }
@@ -69,11 +69,11 @@ NumericMatrix run_seir_cpp(
     // I_tot[i] = I1[i] + I2[i] + I1v[i] + I2v[i]
     for (int i = 0; i < ng; i++) I_tot[i] = I1[i] + I2[i] + I1v[i] + I2v[i];
     
-    // lambda[i] = susc[i] * trans * sum_j(cij[i,j] * I_tot[j])
+    // lambda[i] = trans * sum_j(cij[i,j] * I_tot[j])
     for (int i = 0; i < ng; i++) {
       double s = 0.0;
       for (int j = 0; j < ng; j++) s += cij(i, j) * I_tot[j];
-      lambda[i] = susc[i] * trans * s;
+      lambda[i] = trans * s;
     }
     
     // Flows

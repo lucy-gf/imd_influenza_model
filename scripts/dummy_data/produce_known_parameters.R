@@ -11,6 +11,7 @@ options(dplyr.summarise.inform = FALSE)
 
 .args <- if (interactive()) c(
   file.path("data", "inputs", "imd_age_pop.rds"),
+  file.path("data", "inputs", "subtype_years.rds"),
   file.path("data", "population", "risk_group_population_data.rds"),
   file.path("data", "dummy_data", "known_parameters.rds")
 ) else commandArgs(trailingOnly = TRUE)
@@ -18,7 +19,7 @@ options(dplyr.summarise.inform = FALSE)
 if(!dir.exists(file.path("data", "dummy_data"))){dir.create(file.path("data", "dummy_data"))}
 
 source(file.path('scripts','setup','colors.R'))
-source(file.path('scripts','setup','age_grp_assignment.R'))
+source(file.path('scripts','setup','base_functions.R'))
 
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
@@ -40,6 +41,9 @@ imd_age_pop <- imd_age_pop %>%
 
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
+subtype_vec <- c('AH1N1','AH3N2','B')
+subtype_years <- read_rds(.args[2])
+subtype_years <- subtype_years %>% mutate(subtype = convert_to_subtype(subtype))
 
 #### PROPORTIONS IN RISK GROUPS ####
 
@@ -50,7 +54,7 @@ USING_TRUE_RISK_DAT <- T
 if(USING_TRUE_RISK_DAT){
   
   ## loading in true risk group data
-  risk_group_dat <- readRDS(.args[2]) %>% 
+  risk_group_dat <- readRDS(.args[3]) %>% 
     mutate(.by = interval,
            proportion = count/sum(count)) %>% 
     filter(risk_group %like% 'high') %>% arrange(lower)
@@ -241,7 +245,7 @@ ggsave(file.path('output','figures','dummy_infections','dummy_vacc_risk_props.pn
 ## FOR NOW USING MADE UP DATA
 ## TODO UPDATE WHEN DATA AVAILABLE
 
-vaccination_efficacy_infection_A <- cross_join(
+vaccination_efficacy_infection_AH1N1 <- cross_join(
   data.table(age_grp = age_labels,  
              VE_INF = fcn_assign_ages(
                0.45, 
@@ -249,7 +253,18 @@ vaccination_efficacy_infection_A <- cross_join(
                0.3,
                age_labels
              )),
-  data.table(start_of_season = years, strain = "A")
+  data.table(start_of_season = years, subtype = "AH1N1")
+) 
+
+vaccination_efficacy_infection_AH3N2 <- cross_join(
+  data.table(age_grp = age_labels,  
+             VE_INF = fcn_assign_ages(
+               0.45, 
+               0.35,
+               0.3,
+               age_labels
+             )),
+  data.table(start_of_season = years, subtype = "AH3N2")
 ) 
 
 vaccination_efficacy_infection_B <- cross_join(
@@ -260,11 +275,12 @@ vaccination_efficacy_infection_B <- cross_join(
                0.3,
                age_labels
              )),
-  data.table(start_of_season = years, strain = "B")
+  data.table(start_of_season = years, subtype = "B")
 ) 
 
 vaccination_efficacy_infection <- rbind(
-  vaccination_efficacy_infection_A,
+  vaccination_efficacy_infection_AH1N1,
+  vaccination_efficacy_infection_AH3N2,
   vaccination_efficacy_infection_B
 )
 
@@ -274,16 +290,22 @@ vaccination_efficacy_infection <- rbind(
  
 # from: https://doi.org/10.1111/irv.70194
 
-VE_2_17_A_2022_2023 <- 0.60
-VE_2_17_A_2023_2024 <- 0.50
+VE_2_17_AH1N1_2022_2023 <- 0.61
+VE_2_17_AH1N1_2023_2024 <- 0.47
+VE_2_17_AH3N2_2022_2023 <- 0.63
+VE_2_17_AH3N2_2023_2024 <- 0.67
 VE_2_17_B_2022_2023 <- 0.87
 VE_2_17_B_2023_2024 <- 0.84
-VE_18_64_A_2022_2023 <- 0.28
-VE_18_64_A_2023_2024 <- 0.34
+VE_18_64_AH1N1_2022_2023 <- 0.34
+VE_18_64_AH1N1_2023_2024 <- 0.48
+VE_18_64_AH3N2_2022_2023 <- 0.27
+VE_18_64_AH3N2_2023_2024 <- 0.36
 VE_18_64_B_2022_2023 <- 0.53
 VE_18_64_B_2023_2024 <- 0.70
-VE_65_A_2022_2023 <- 0.25
-VE_65_A_2023_2024 <- 0.17
+VE_65_AH1N1_2022_2023 <- 0.24
+VE_65_AH1N1_2023_2024 <- 0.37
+VE_65_AH3N2_2022_2023 <- 0.25
+VE_65_AH3N2_2023_2024 <- 0.20
 VE_65_B_2022_2023 <- 0.28
 VE_65_B_2023_2024 <- 0.39
 
@@ -295,11 +317,14 @@ ukhsa_dat_2024_25 <- read_ods(file.path("data","ukhsa","annual_influenza_2024_20
 colnames(ukhsa_dat_2024_25) <- c('age_group','flu_subtype','NA1','NA2','NA3','NA4','VE','VE_CIL','VE_CIU')
 ukhsa_dat_2024_25 <- ukhsa_dat_2024_25 %>% mutate(VE = VE/100)
 
-VE_2_17_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'Any Influenza A'))$VE
+VE_2_17_AH1N1_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'H1N1'))$VE
+VE_2_17_AH3N2_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'H3N2'))$VE
 VE_2_17_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'Influenza B'))$VE
-VE_18_64_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'Any Influenza A'))$VE
+VE_18_64_AH1N1_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'H1N1'))$VE
+VE_18_64_AH3N2_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'H3N2'))$VE
 VE_18_64_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'Influenza B'))$VE
-VE_65_A_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'Any Influenza A'))$VE
+VE_65_AH1N1_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'H1N1'))$VE
+VE_65_AH3N2_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'H3N2'))$VE
 VE_65_B_2024_2025 <- (ukhsa_dat_2024_25 %>% filter(age_group %like% '65', flu_subtype %like% 'Influenza B'))$VE
 
 # from: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026#vaccination
@@ -312,26 +337,29 @@ ukhsa_dat_2025_26 <- ukhsa_dat_2025_26 %>%
   mutate(VE = as.numeric(sub("%.*", "", VE))/100,
          flu_subtype = gsub(substr(ukhsa_dat_2025_26$flu_subtype[2], 4, 4), '', flu_subtype))
 
-VE_2_17_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_2_17_AH1N1_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'H1N1'))$VE
+VE_2_17_AH3N2_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'H3N2'))$VE
 VE_2_17_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '2 to 17', flu_subtype %like% 'InfluenzaB'))$VE
-VE_18_64_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_18_64_AH1N1_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'H1N1'))$VE
+VE_18_64_AH3N2_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'H3N2'))$VE
 VE_18_64_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '18 to 64', flu_subtype %like% 'InfluenzaB'))$VE
-VE_65_A_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'AnyInfluenzaA'))$VE
+VE_65_AH1N1_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'H1N1'))$VE
+VE_65_AH3N2_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'H3N2'))$VE
 VE_65_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'InfluenzaB'))$VE
 
-vaccination_efficacy_hospitalisation <- CJ(strain = c('A','B'),
+vaccination_efficacy_hospitalisation <- CJ(subtype = subtype_vec,
                                            start_of_season = years,
                                            age_grp = age_labels,
                                            VE_HOSP = 0)
 
-for(strain_i in c('A','B')){
+for(subtype_i in subtype_vec){
   for(season_i in years){
     vaccination_efficacy_hospitalisation[
-      strain == strain_i & start_of_season == season_i, 
+      subtype == subtype_i & start_of_season == season_i, 
       VE_HOSP := fcn_assign_ages(
-      get(paste0('VE_2_17_', strain_i, '_', season_i, '_', season_i + 1)), 
-      get(paste0('VE_18_64_', strain_i, '_', season_i, '_', season_i + 1)),
-      get(paste0('VE_65_', strain_i, '_', season_i, '_', season_i + 1)),
+      get(paste0('VE_2_17_', subtype_i, '_', season_i, '_', season_i + 1)), 
+      get(paste0('VE_18_64_', subtype_i, '_', season_i, '_', season_i + 1)),
+      get(paste0('VE_65_', subtype_i, '_', season_i, '_', season_i + 1)),
       age_labels
     )]
   }
@@ -339,18 +367,35 @@ for(strain_i in c('A','B')){
 
 vaccination_efficacy_hospitalisation %>% 
   ggplot() + 
-  geom_line(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain),
+  geom_line(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype),
                 col = as.factor(start_of_season)), lwd = 1) +
-  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain)), 
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype)), 
              col='white', size = 3) +
-  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, strain),
-                 col = as.factor(start_of_season), shape = strain), 
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype),
+                 col = as.factor(start_of_season), shape = subtype), 
              stroke=1.5, size = 3) +
-  scale_shape_manual(values = c(1, 2)) +
+  scale_shape_manual(values = c(1, 2, 4)) +
   scale_color_manual(values = season_colors) +
   theme_bw() + labs(x = 'Age group', col = 'Season start',
                     y = 'VE against hospitalisation') +
-  facet_grid(strain ~.) + 
+  facet_grid(subtype ~.) + 
+  theme(text = element_text(size = 14))
+
+vaccination_efficacy_hospitalisation %>% 
+  ggplot() + 
+  geom_line(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype),
+                col = subtype), lwd = 1) +
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype)), 
+             col='white', size = 3) +
+  geom_point(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype),
+                 col = subtype, shape = as.factor(start_of_season)), 
+             stroke=1.5, size = 3) +
+  ylim(c(NA, 1)) + 
+  scale_shape_manual(values = c(1, 2, 4)) +
+  scale_color_manual(values = subtype_colors) +
+  theme_bw() + labs(x = 'Age group', col = 'Subtype', shape = 'Season',
+                    y = 'VE against hospitalisation') +
+  facet_grid(start_of_season ~.) +
   theme(text = element_text(size = 14))
 
 ggsave(file.path('output','figures','dummy_infections','ukhsa_ve_hospitalisation.png'),
@@ -358,10 +403,11 @@ ggsave(file.path('output','figures','dummy_infections','ukhsa_ve_hospitalisation
 
 ## join together with vaccination coverage data
 
-vaccinated_data <- rbind(vaccinated_pop %>% mutate(strain = 'A'),
-                         vaccinated_pop %>% mutate(strain = 'B')) %>% 
-  left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season', 'strain')) %>% 
-  left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season', 'strain')) %>% 
+vaccinated_data <- rbind(vaccinated_pop %>% mutate(subtype = 'AH1N1'),
+                         vaccinated_pop %>% mutate(subtype = 'AH3N2'),
+                         vaccinated_pop %>% mutate(subtype = 'B')) %>% 
+  left_join(vaccination_efficacy_infection, by = c('age_grp','start_of_season', 'subtype')) %>% 
+  left_join(vaccination_efficacy_hospitalisation, by = c('age_grp','start_of_season', 'subtype')) %>% 
   mutate(effectively_vaccinated_population = round(VE_INF*vaccinated_population))
 
 #### EPI PERIODS ####
@@ -398,5 +444,5 @@ known_pars <- list(
 
 #### SAVE KNOWN PARAMETERS ####
 
-saveRDS(known_pars, .args[3])
+saveRDS(known_pars, .args[4])
 

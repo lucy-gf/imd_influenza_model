@@ -1,3 +1,22 @@
+#### BASE FUNCTIONS FOR ANALYSIS ####
+
+convert_to_subtype <- function(string_vec){
+  
+  for(k in 1:length(string_vec)){
+    
+    text <- string_vec[k]
+    
+    updated_text <- gsub('flu|pdm09|_', '', text)
+    
+    string_vec[k] <- toupper(updated_text)
+    
+  }
+  
+  string_vec
+  
+}
+
+
 ## FUNCTION TO ASSIGN AGE GROUPS TO BROAD AGE GROUPS ##
 
 # PURPOSE

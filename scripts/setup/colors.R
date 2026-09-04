@@ -120,8 +120,9 @@ variables_and_names <- list(
 
 flu_strain_colors <- c('flu_a' = '#81559B', 'flu_b' = '#6699CC')#'#B2EF9B')
 flu_strain_names <- c('flu_a' = 'Flu A', 'flu_b' = 'Flu B')
-strain_colors <- c('A' = '#81559B', 'B' = '#6699CC')
-strain_names <- c('A' = 'Flu A', 'B' = 'Flu B')
+subtype_colors <- c('A' = '#81559B', 'AH1N1' = '#FF3C38', 'AH3N2' = '#FF8C42',
+                   'AUNSUB' = '#A23E48', 'B' = '#6699CC')
+subtype_names <- c('A' = 'Flu A', 'AH1N1' = 'Flu A (H1N1)', 'AH3N2' = 'Flu A (H3N2)', 'AUNSUB' = 'Flu A (unsubtyped)', 'B' = 'Flu B')
 
 flu_subtype_colors <- c('flu_a' = '#81559B', 'flu_a_h1n1pdm09' = '#FF3C38', 'flu_a_h3n2' = '#FF8C42',
                         'flu_a_unsubtyped' = '#A23E48', 'flu_b' = '#6699CC')

@@ -23,6 +23,7 @@ INPUTDIR ?= ${DATADIR}/inputs
 DUMMYDAT ?= ${DATADIR}/dummy_data
 CMDIR ?= ${DATADIR}/contact_matrix
 POPDIR ?= ${DATADIR}/population
+UKHSADIR ?= ${DATADIR}/ukhsa
 OUTDIR ?= output
 FIGDIR ?= ${OUTDIR}/figures
 DATDIR ?= ${OUTDIR}/data
@@ -51,14 +52,17 @@ ${INPUTDIR}/contact_matrix.rds: ${SETUPDIR}/load_contact_data.R ${CMDIR}/fitted_
 ${INPUTDIR}/imd_age_pop.rds: ${SETUPDIR}/load_pop_data.R ${POPDIR}/imd_2025.xlsx ${POPDIR}/lsoa_to_region.csv
 	$(call R)
 
-all_inputs: ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/imd_age_pop.rds
+${INPUTDIR}/subtype_years.rds: ${SETUPDIR}/subtype_setup.R ${UKHSADIR}/annual_influenza_2025_2026.ods
+	$(call R)
+
+all_inputs: ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/subtype_years.rds
 
 ##### PARAMETERS ###################################################################
 
-${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds ${POPDIR}/risk_group_population_data.rds
+${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/subtype_years.rds ${POPDIR}/risk_group_population_data.rds
 	$(call R)
 
-${DUMMYDAT}/unknown_parameters.rds: ${DUMMYDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds
+${DUMMYDAT}/unknown_parameters.rds: ${DUMMYDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/subtype_years.rds
 	$(call R)
 
 all_pars: ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
@@ -71,6 +75,7 @@ ${DUMMYDAT}/dummy_infections.rds: ${DUMMYDIR}/dummy_infections.R ${INPUTDIR}/imd
 ${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 	$(call R)
 
+dummy_inf: ${DUMMYDAT}/dummy_infections.rds
 all_dummy: ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/dummy_surveillance.rds
 
 
