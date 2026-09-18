@@ -16,7 +16,7 @@ options(dplyr.summarise.inform = FALSE)
 ) else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
-source(file.path('scripts','setup','age_grp_assignment.R'))
+source(file.path('scripts','setup','base_functions.R'))
 
 ## read in UKHSA data
 ukhsa_dat <- read_ods(.args[1], sheet = 48, skip = 3)
@@ -46,10 +46,12 @@ p_tests <- ukhsa_dat %>%
   theme_bw() + labs(x = '', y = 'Overall tests carried out', col = 'Positivity')
 
 stacked_plot <- function(min_year = 2021,
+                         min_month = 1,
                          all_a = F){
   if(!all_a){
     p <- ukhsa_dat %>% 
-      filter(year(date_formatted) >= min_year) %>% 
+      filter(! (year(date_formatted) < min_year | 
+                  (year(date_formatted) == min_year & month(date_formatted) < min_month))) %>% 
       select(date_formatted, flu_a, flu_b) %>% 
       pivot_longer(!date_formatted) %>% 
       ggplot() + 
@@ -61,7 +63,8 @@ stacked_plot <- function(min_year = 2021,
       theme_bw()
   }else{
     p <- ukhsa_dat %>% 
-      filter(year(date_formatted) >= min_year) %>% 
+      filter(! (year(date_formatted) < min_year | 
+                  (year(date_formatted) == min_year & month(date_formatted) < min_month))) %>% 
       select(date_formatted, starts_with('flu_')) %>% 
       select(!c(flu_a, flu_tot)) %>% 
       pivot_longer(!date_formatted) %>% 
@@ -187,6 +190,9 @@ ggsave(gsub('strain.png', 'positivity.png', .args[2]), width = width_val, height
 stacked_plot(min_year = 2021) + stacked_plot(min_year = 2021, all_a = T) +
   plot_layout(nrow = 2)
 ggsave(gsub('.png', '_stacked.png', .args[2]), width = width_val, height = height_val)
+
+stacked_plot(min_year = 2023, min_month = 7, all_a = T) 
+ggsave(gsub('.png', '_PPT.png', .args[2]), width = width_val, height = height_val/2)
 
 absolute_plot(min_year = 2021) + absolute_plot(min_year = 2021, all_a = T) +
   plot_layout(nrow = 2)

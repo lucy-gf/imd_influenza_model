@@ -15,7 +15,7 @@ run_model <- function(
     susc,
     lat_per,
     inf_per,
-    t_end = 250
+    t_end = 300
 ) {
   
   # susceptibility is age-specific

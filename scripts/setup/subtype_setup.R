@@ -136,20 +136,49 @@ ukhsa_dat %>%
   labs(x = '', y = 'Positive tests', col = '') +
   theme_bw()
 
-subtype_info <- ukhsa_dat %>% 
+subtype_info_raw <- ukhsa_dat %>% 
   filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
   select(season, date_formatted, starts_with('flu_')) %>% 
-  select(!c(flu_a, flu_tot)) %>% 
+  select(!c(flu_a, flu_tot)) 
+
+# assign flu_a_unsubtyped to flu_a_h1n1pdm09 or flu_a_h3n2
+for(i in 1:nrow(subtype_info_raw)){
+  
+  assigned_h1n1 <- sum(sample(x = c(1, 0), 
+                          size = subtype_info_raw$flu_a_unsubtyped[i],
+                          replace = T,
+                          prob = c(subtype_info_raw$flu_a_h1n1pdm09[i], subtype_info_raw$flu_a_h3n2[i])
+                          ))
+  
+  assigned_h3n2 <- subtype_info_raw$flu_a_unsubtyped[i] - assigned_h1n1
+  
+  subtype_info_raw$flu_a_unsubtyped[i] <- 0
+  subtype_info_raw$flu_a_h1n1pdm09[i] <- assigned_h1n1
+  subtype_info_raw$flu_a_h3n2[i] <- assigned_h3n2
+  
+}
+
+subtype_info <- subtype_info_raw %>% 
   pivot_longer(!c(season, date_formatted)) %>% 
   rename(subtype = name) %>% 
-  filter(!subtype %like% 'subtype') %>% 
   group_by(season, subtype) %>% 
   mutate(mean = mean(value),
          week = 1:n(),
-         peak = which.max(value)) %>% 
-  select(season, subtype, peak, mean) %>% unique() %>% ungroup() %>% 
+         peak = which.max(value)) %>% ungroup() %>% 
   mutate(peak_qual = case_when(peak > 30 ~ 'Late', T ~ 'Normal')) %>% 
-  filter(mean > 50)
+  filter(mean > 50) %>% 
+  group_by(season, week) %>% 
+  mutate(tot_pos = sum(value)) %>% ungroup() %>% 
+  mutate(proportion = value/tot_pos,
+         subtype = convert_to_subtype(subtype)) %>% select(!tot_pos)
 
+subtype_info %>% 
+  ggplot() + 
+  geom_bar(aes(week, proportion, fill = subtype),
+           position = 'stack', stat = 'identity') +
+  theme_bw() +
+  scale_fill_manual(values = subtype_colors) +
+  facet_grid(season ~ .)
+  
 write_rds(subtype_info, .args[2])
 

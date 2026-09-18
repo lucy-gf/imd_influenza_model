@@ -13,12 +13,14 @@ options(dplyr.summarise.inform = FALSE)
 .args <- #if (interactive()) c(
   c(file.path("data", "inputs", "imd_age_pop.rds"),
     file.path("data", "inputs", "contact_matrix.rds"),
+    file.path("data", "inputs", "subtype_years.rds"),
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
     file.path("output", "data", "mcmc_samples_rates_unknown.rds")
   ) #else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
+source(file.path('scripts','setup','base_functions.R'))
 source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
@@ -81,11 +83,14 @@ ndim <- nrow(pc_cm)
 if(!all.equal(2*ng, ndim)){warning('dimensions not adding up')}
 if(!all.equal(2*nimd*nage, ndim)){warning('dimensions not adding up')}
 
+## SUBTYPE-SEASONS
+subtype_seasons <- readRDS(.args[3])
+
 ## SURVEILLANCE DATA
-surveillance_data <- readRDS(.args[3])
+surveillance_data <- readRDS(.args[4])
 
 ## KNOWN PARAMETERS
-known_pars <- readRDS(.args[4])
+known_pars <- readRDS(.args[5])
 
 years <- known_pars$years
 
@@ -103,20 +108,24 @@ n_samples <- 10
 mcmc_parallel <- function(i){
   
   txt_output <<- i
+  year_i <- years[i]
+  season_i <- paste0(year_i, '/', substr(year_i + 1, 3,4))
   
   ## population data
   
   vaccinated_data_seasonal <- known_pars$vaccinated_data
   vaccinated_data_seasonal$age_grp <- factor(vaccinated_data_seasonal$age_grp, levels = age_labels)
   vaccinated_data_seasonal <- vaccinated_data_seasonal %>% 
-    filter(start_of_season == years[i]) %>% 
-    arrange(desc(risk_level), imd_quintile, age_grp)
+    filter(start_of_season == year_i) %>% 
+    arrange(subtype, desc(risk_level), imd_quintile, age_grp)
+  vaccinated_data_seasonal_no_rep <- vaccinated_data_seasonal %>% 
+    filter(subtype == vaccinated_data_seasonal$subtype[1])
   
   ## should be ordered by IMD then age
   if(vaccinated_data_seasonal$imd_quintile[2] != 1){warning('vaccinated_data_seasonal in wrong order')}
   if(vaccinated_data_seasonal$age_grp[2] != age_labels[2]){warning('vaccinated_data_seasonal in wrong order')}
   
-  demography <- vaccinated_data_seasonal %>% 
+  demography <- vaccinated_data_seasonal_no_rep %>% 
     mutate(population = pop) %>% 
     select(age_grp, imd_quintile, risk_level, population, risk_proportion) %>% 
     arrange(desc(risk_level), imd_quintile, age_grp)
@@ -128,15 +137,16 @@ mcmc_parallel <- function(i){
   run_mcmc_inference(
     demography_input = demography, 
     vaccinated_input = vaccinated_data_seasonal,
+    subtype_season = subtype_seasons %>% filter(season == season_i),
     cm_input = pc_cm, 
-    epidemic_to_fit = surveillance_data %>% filter(index==i), 
+    epidemic_to_fit = surveillance_data %>% filter(index == i), 
     epid_periods = known_pars$epid_periods,
     coverage_rates = known_pars$proportion_observed,
     care_delays = delays,
-    initial_parameters = c(0.07, rep(1, 2), 2, 
+    initial_parameters = c(0.07, 0.4, rep(1, 2), 2, 
                            rep(0.02, 6), rep(0.002, 6),
                            rep(0, 4)),
-    # c(transmissibility, 2x relative susceptibility, log of initial infected, 
+    # c(transmissibility, absolute susceptibility, 2x relative susceptibility, log of initial infected, 
     #   reporting rates for primary care, reporting rates for secondary care,
     #   IMD spline parameters x4)
     n_samples = n_samples*nchains, 
@@ -147,16 +157,16 @@ mcmc_parallel <- function(i){
   )
 }
 
-mcmc_results <- mclapply(1:3, mcmc_parallel, mc.cores = 3)
+mcmc_results <- mclapply(1:nrow(subtype_seasons), mcmc_parallel, mc.cores = 3)
 
 #### SAVE RESULTS ####
 
 # save most recently run settings as a dummy save
 write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
                      HPC = F,
-                     date = Sys.Date()), .args[5]) 
+                     date = Sys.Date()), .args[6]) 
 
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_', burn_in,'_',thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
-                             .args[5]))
+                             .args[6]))
 

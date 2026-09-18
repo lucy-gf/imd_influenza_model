@@ -57,11 +57,11 @@ broad_ages_care_rates <- data.table(
 
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
-subtype_vec <- c('AH1N1','AH3N2','B')
 subtype_years <- read_rds(.args[2])
 subtype_years <- subtype_years %>% 
-  mutate(subtype = convert_to_subtype(subtype),
-         year = as.numeric(substr(season, 1, 4)))
+  select(season, subtype) %>% unique() %>% 
+  mutate(year = as.numeric(substr(season, 1, 4)))
+subtype_vec <- unique(subtype_years$subtype)
 
 #### EPIDEMIOLOGICAL PARAMETERS ####
 
@@ -72,7 +72,8 @@ epid_pars <- subtype_years %>%
   select(year, subtype) %>% unique() %>% 
   mutate(susceptibility = rnorm(n = nrow(subtype_years), mean = 0.4, sd = 0.005),
          transmissibility = rnorm(n = nrow(subtype_years), mean = 0.12, sd = 0.001)) %>% 
-  mutate(susceptibility = case_when(subtype == 'B' ~ 0.75*susceptibility, T ~ susceptibility))
+  mutate(susceptibility = case_when(subtype == 'B' ~ 0.6*susceptibility, T ~ susceptibility),
+         transmissibility = case_when(subtype == 'B' ~ 1.25*transmissibility, T ~ transmissibility))
 
 ## relative susceptibility (relative to adults' susceptibility)
 rel_susceptibility <- data.table(cross_join(
@@ -113,7 +114,7 @@ epid_parameters <- subtype_years %>% select(year, subtype) %>%
          infectious_period = epid_periods[2],
          start_date = as.Date(paste0('01-09-', year), "%d-%m-%Y"),
          init_infected = floor(rnorm(n = nrow(subtype_years), mean = 300, sd = 10))) %>% 
-  mutate(init_infected = case_when(subtype == 'B' ~ 0.5*init_infected, T ~ init_infected)) %>% 
+  mutate(init_infected = case_when(subtype == 'B' ~ 0.4*init_infected, T ~ init_infected)) %>% 
   left_join(rel_susceptibility %>% mutate(broad_age = paste0('rel_susc_', broad_age)) %>% 
               pivot_wider(names_from = broad_age, values_from = rel_susceptibility),
             by = c('year','subtype'))

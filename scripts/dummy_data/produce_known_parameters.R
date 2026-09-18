@@ -41,9 +41,8 @@ imd_age_pop <- imd_age_pop %>%
 
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
-subtype_vec <- c('AH1N1','AH3N2','B')
-subtype_years <- read_rds(.args[2])
-subtype_years <- subtype_years %>% mutate(subtype = convert_to_subtype(subtype))
+subtype_years <- read_rds(.args[2]) %>% select(season, subtype) %>% unique()
+subtype_vec <- unique(subtype_years$subtype)
 
 #### PROPORTIONS IN RISK GROUPS ####
 

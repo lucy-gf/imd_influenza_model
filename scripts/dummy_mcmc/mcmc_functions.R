@@ -7,6 +7,7 @@ if(!dir.exists(TEXT_SAVE_DIR)){dir.create(TEXT_SAVE_DIR)}
 run_mcmc_inference <- function(
     demography_input, 
     vaccinated_input,
+    subtype_season,
     cm_input, 
     epidemic_to_fit, 
     epid_periods,
@@ -23,7 +24,7 @@ run_mcmc_inference <- function(
   ## SET UP DATA FRAMES ETC. ##
   broad_ages <- data.table(
     age_grp = age_labels, 
-    broad_age = c(rep('children', 3), rep('adults', 4), rep('older_adults', 2))
+    broad_age = fcn_assign_ages('children','adults','older_adults',age_labels)
   )
   epidemic_dt <- as.data.table(epidemic_to_fit)
   coverage_rates$imd_quintile <- factor(coverage_rates$imd_quintile)
@@ -54,14 +55,15 @@ run_mcmc_inference <- function(
     }
     
     transmissibility <- pars[1]
-    susceptibility <- susc_vector(pars[2:3]) 
-    init_infected_num <- 10^(pars[4])
+    adult_susceptibilty <- pars[2]
+    rel_susceptibility <- susc_vector(pars[3:4]) 
+    init_infected_num <- 10^(pars[5])
     
     care_rate_df <- data.frame(
       broad_age = rep(unique(broad_ages$broad_age), 2),
       risk_level = rep(c('low','high'), each = 3),
-      primary_care = pars[5:10],
-      secondary_care = pars[11:16]
+      primary_care = pars[6:11],
+      secondary_care = pars[12:17]
     )
 
     care_rate_age_df <- data.table(cross_join(
@@ -70,8 +72,8 @@ run_mcmc_inference <- function(
     care_rate_age_df[, c('broad_age.x','broad_age.y') := NULL]
     
     imd_spline_pars <- data.table(
-      primary = pars[17:18],
-      secondary = pars[19:20]
+      primary = pars[18:19],
+      secondary = pars[20:21]
     )
     rel_imd_rep_rates <- data.frame(imd_quintile = 1:5,
                                     rel_primary_rates = imd_spline(imd_spline_pars$primary),

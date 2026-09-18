@@ -212,9 +212,9 @@ for(i in 1:nrow(subtype_seasons)){
     time_series %>% group_by(t) %>% summarise(inf = sum(infections), pop = sum(pop)) %>% ggplot() + geom_line(aes(t,inf/pop))
   }
   
-  n_subpops_min <- sum(time_series[t == max(t), ]$infections> 1)
+  n_subpops_min <- sum(time_series[t == max(t), ]$infections > 5)
   if(n_subpops_min > 0){
-    warning(paste0('Epidemic ', paste0(subtype_season_i, collapse = ' '),' still above 1 in ', n_subpops_min, '/', n_tot_subpops, ' subpopulations'))
+    warning(paste0('Epidemic ', paste0(subtype_season_i, collapse = ' '),' still above 5 in ', n_subpops_min, '/', n_tot_subpops, ' subpopulations'))
   }
   
   time_series[, start_date := pars$start_date]
@@ -313,6 +313,17 @@ patchwork::wrap_plots(weekly_prop_plots, nrow = 3)
 
 ggsave(file.path("output", "figures", "dummy_infections", "dummy_infections.png"),
        height = 13, width = 9)
+
+rbindlist(seasonal_seir_outputs, idcol = "id") %>% 
+  mutate(date = start_date + t) %>% 
+  group_by(subtype, date) %>% 
+  summarise(inf = sum(infections)) %>% 
+  ggplot() + 
+  geom_bar(aes(date, inf, fill = subtype),
+           position = 'stack', stat = 'identity', width = 1) +
+  scale_fill_manual(values = subtype_colors, labels = subtype_names) +
+  labs(x = '', y = 'infections', fill = '') +
+  theme_lg()
 
 #### SAVE DUMMY DATA ####
 
