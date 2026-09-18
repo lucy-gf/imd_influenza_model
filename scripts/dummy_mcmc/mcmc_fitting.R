@@ -109,7 +109,7 @@ mcmc_parallel <- function(i){
   
   txt_output <<- i
   year_i <- years[i]
-  season_i <- paste0(year_i, '/', substr(year_i + 1, 3,4))
+  season_i <- paste0(year_i, '/', substr(year_i + 1, 3, 4))
   
   ## population data
   
@@ -134,21 +134,24 @@ mcmc_parallel <- function(i){
   tot_pop <- sum(imd_age_pop$pop)
   if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
   
+  subtype_init_pars <- c(0.12, 0.5, rep(1, 2), 2.5, 
+                         rep(0.02, 6), rep(0.002, 6))
+                         # c(transmissibility, absolute susceptibility, 2x relative susceptibility, log of initial infected, 
+                         #   reporting rates for primary care, reporting rates for secondary care)
+  
   run_mcmc_inference(
     demography_input = demography, 
     vaccinated_input = vaccinated_data_seasonal,
     subtype_season = subtype_seasons %>% filter(season == season_i),
-    cm_input = pc_cm, 
-    epidemic_to_fit = surveillance_data %>% filter(index == i), 
+    cm_input = pc_cm,
+    epidemic_to_fit = surveillance_data %>% filter(index == i),
     epid_periods = known_pars$epid_periods,
     coverage_rates = known_pars$proportion_observed,
     care_delays = delays,
-    initial_parameters = c(0.07, 0.4, rep(1, 2), 2, 
-                           rep(0.02, 6), rep(0.002, 6),
+    initial_parameters = c(subtype_init_pars,
+                           subtype_init_pars,
                            rep(0, 4)),
-    # c(transmissibility, absolute susceptibility, 2x relative susceptibility, log of initial infected, 
-    #   reporting rates for primary care, reporting rates for secondary care,
-    #   IMD spline parameters x4)
+    #   subtype-specific parameters x2, IMD spline parameters x4
     n_samples = n_samples*nchains, 
     nburn = burn_in*nchains, 
     thinning = thinning_value,
@@ -157,7 +160,7 @@ mcmc_parallel <- function(i){
   )
 }
 
-mcmc_results <- mclapply(1:nrow(subtype_seasons), mcmc_parallel, mc.cores = 3)
+mcmc_results <- mclapply(1:length(years), mcmc_parallel, mc.cores = length(years))
 
 #### SAVE RESULTS ####
 
