@@ -137,8 +137,9 @@ ukhsa_dat %>%
   theme_bw()
 
 subtype_info_raw <- ukhsa_dat %>% 
+  mutate(total_tests = flu_tot/positivity) %>% 
   filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
-  select(season, date_formatted, starts_with('flu_')) %>% 
+  select(season, date_formatted, starts_with('flu_'), total_tests) %>% 
   select(!c(flu_a, flu_tot)) 
 
 # assign flu_a_unsubtyped to flu_a_h1n1pdm09 or flu_a_h3n2
@@ -159,7 +160,7 @@ for(i in 1:nrow(subtype_info_raw)){
 }
 
 subtype_info <- subtype_info_raw %>% 
-  pivot_longer(!c(season, date_formatted)) %>% 
+  pivot_longer(!c(season, date_formatted, total_tests)) %>% 
   rename(subtype = name) %>% 
   group_by(season, subtype) %>% 
   mutate(mean = mean(value),
@@ -167,7 +168,7 @@ subtype_info <- subtype_info_raw %>%
          peak = which.max(value)) %>% ungroup() %>% 
   mutate(peak_qual = case_when(peak > 30 ~ 'Late', T ~ 'Normal')) %>% 
   filter(mean > 50) %>% 
-  group_by(season, week) %>% 
+  group_by(season, week, total_tests) %>% 
   mutate(tot_pos = sum(value)) %>% ungroup() %>% 
   mutate(proportion = value/tot_pos,
          subtype = convert_to_subtype(subtype)) %>% select(!tot_pos)

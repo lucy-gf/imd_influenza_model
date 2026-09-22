@@ -52,12 +52,13 @@ for(k in 1:length(infections)){
   
   ## merge with coverage rates and attendance rates
   infections_df <- infections[[k]] %>% 
-    mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
+    mutate(imd_quintile = as.numeric(imd_quintile),
+           year = year(start_date)) %>% 
     left_join(known_pars$vaccinated_data %>% 
                 filter(start_of_season == year_i, subtype == subtype_i) %>% 
                 select(age_grp, imd_quintile, risk_level, VE_INF, VE_HOSP),
               by = c('age_grp','imd_quintile','risk_level')) %>% 
-    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile','risk_level')) %>% 
+    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile','risk_level','subtype','year')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
     mutate(observed_infections = round(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population

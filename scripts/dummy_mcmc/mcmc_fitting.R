@@ -16,7 +16,7 @@ options(dplyr.summarise.inform = FALSE)
     file.path("data", "inputs", "subtype_years.rds"),
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
-    file.path("output", "data", "mcmc_samples_rates_unknown.rds")
+    file.path("output", "data", "mcmc_samples.rds")
   ) #else commandArgs(trailingOnly = TRUE)
 
 source(file.path('scripts','setup','colors.R'))
@@ -101,9 +101,9 @@ names(delays) <- c('primary','secondary')
 
 ## MCMC pars
 nchains <- 3
-burn_in <- 10
-thinning_value <- 2
-n_samples <- 10
+burn_in <- 200
+thinning_value <- 1
+n_samples <- 2000
 
 mcmc_parallel <- function(i){
   

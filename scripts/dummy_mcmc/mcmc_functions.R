@@ -599,39 +599,134 @@ run_mcmc_inference <- function(
 ## FUNCTIONS TO PLOT MCMC SAMPLES ##
 
 plot_density <- function(var, filtered = T){
+  
   data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples}
-  data %>%
-    pivot_longer(!c(iteration,epidemic,chain)) %>%
-    filter(name == var) %>%
-    mutate(epidemic = paste0("Epidemic ", epidemic)) %>% 
-    ggplot() +
-    geom_density(aes(x = value, fill = as.factor(chain), group = chain), alpha = 0.4) +
-    geom_vline(data = epid_pars %>% mutate(epidemic = paste0("Epidemic ", epidemic)) %>% filter(name==var),
-               aes(xintercept = value), lty=2) +
-    theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
-    facet_grid(.~epidemic) +
-    # scale_fill_manual(values = var_cols) +
-    theme(legend.position = 'none')
+  
+  if(var != 'likelihood'){
+    data <- data %>% select(!likelihood)
+  }
+  
+  epid_pars_joining <- epid_pars %>% 
+    mutate(true_value = value) %>% 
+    filter(name == var) %>% 
+    select(epidemic, epidemic_of_season, season, subtype, name, true_value)
+  
+  if(!grepl('imd_spline', var)){
+    
+    data %>%
+      select(!starts_with('imd_')) %>% 
+      pivot_longer(!c(iteration,epidemic,chain)) %>%
+      mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
+             name = substr(name, 1, nchar(name) - 7)) %>% 
+      filter(name == var) %>%
+      left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
+      filter(!is.na(season)) %>% # remove non-real epidemics
+      mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
+                                       T ~ F)) %>% 
+      mutate(true_value = case_when(is.na(true_value) ~ 0, T ~ true_value)) %>% 
+      mutate(epidemic = paste0("Season ", epidemic),
+             subtype_season = paste0(season, ": ", subtype)) %>% 
+      ggplot() +
+        geom_density(aes(x = value, fill = as.factor(chain), group = chain), alpha = 0.4) +
+        geom_vline(aes(xintercept = true_value, alpha = true_value_NA), lty=2) +
+        scale_alpha_manual(values = c(1,0)) +
+        theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
+        facet_grid(.~subtype_season, scales = 'free') +
+        theme(legend.position = 'none')
+    
+  }else{
+    
+    epid_pars_joining <- epid_pars_joining %>% 
+      select(!c(subtype, epidemic_of_season)) %>% unique()
+    
+    data %>%
+      pivot_longer(!c(iteration,epidemic,chain)) %>%
+      filter(name == var) %>%
+      left_join(epid_pars_joining, by = c('epidemic','name')) %>% 
+      filter(!is.na(season)) %>% # remove non-real epidemics
+      mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
+                                       T ~ F)) %>% 
+      mutate(true_value = case_when(is.na(true_value) ~ 0, T ~ true_value)) %>% 
+      mutate(epidemic = paste0("Season ", epidemic)) %>% 
+      ggplot() +
+      geom_density(aes(x = value, fill = as.factor(chain), group = chain), alpha = 0.4) +
+      geom_vline(aes(xintercept = true_value, alpha = true_value_NA), lty=2) +
+      scale_alpha_manual(values = c(1,0)) +
+      theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
+      facet_grid(.~season, scales = 'free') +
+      theme(legend.position = 'none')
+    
+  }
+    
 }
 
 plot_trace <- function(var, filtered = F){
-  data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples}
+  
+  data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples} 
+  
+  if(var != 'likelihood'){
+    data <- data %>% select(!likelihood)
+  }
+  
   Y_LAB <- if(var=='R0'){'R0 (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var}
   }
-  p <- data %>%
-    mutate(epidemic = paste0("Epidemic ", epidemic)) %>% 
-    pivot_longer(!c(iteration,epidemic,chain)) %>%
-    filter(name == var) %>%
-    ggplot() +
-    geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain)) +
-    geom_hline(data = epid_pars %>% mutate(epidemic = paste0("Epidemic ", epidemic)) %>% filter(name==var),
-               aes(yintercept = value), lty=2) +
-    # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
-    facet_grid(.~epidemic) +
-    theme_bw() + labs(y = Y_LAB) +
-    # scale_color_manual(values = var_cols) +
-    theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
+  
+  epid_pars_joining <- epid_pars %>% 
+    mutate(true_value = value) %>% 
+    filter(name == var) %>% 
+    select(epidemic, epidemic_of_season, season, subtype, name, true_value)
+  
+  if(!grepl('imd_spline', var)){
+    
+    p <- data %>%
+      select(!starts_with('imd_')) %>% 
+      pivot_longer(!c(iteration,epidemic,chain)) %>%
+      mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
+             name = substr(name, 1, nchar(name) - 7)) %>% 
+      filter(name == var) %>%
+      left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
+      filter(!is.na(season)) %>% # remove non-real epidemics
+      mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
+                                       T ~ F)) %>% 
+      mutate(true_value = case_when(is.na(true_value) ~ 0, T ~ true_value)) %>% 
+      mutate(epidemic = paste0("Season ", epidemic),
+             subtype_season = paste0(season, ": ", subtype)) %>% 
+      ggplot() +
+      geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain)) +
+      geom_hline(aes(yintercept = true_value, alpha = true_value_NA), lty=2) +
+      scale_alpha_manual(values = c(1,0)) +
+      # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
+      facet_grid(.~subtype_season) +
+      theme_bw() + labs(y = Y_LAB) +
+      # scale_color_manual(values = var_cols) +
+      theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
+    
+  }else{
+    
+    epid_pars_joining <- epid_pars_joining %>% 
+      select(!c(subtype, epidemic_of_season)) %>% unique()
+    
+    p <- data %>%
+      pivot_longer(!c(iteration,epidemic,chain)) %>%
+      filter(name == var) %>%
+      left_join(epid_pars_joining, by = c('epidemic','name')) %>% 
+      filter(!is.na(season)) %>% # remove non-real epidemics
+      mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
+                                       T ~ F)) %>% 
+      mutate(true_value = case_when(is.na(true_value) ~ 0, T ~ true_value)) %>% 
+      mutate(epidemic = paste0("Season ", epidemic)) %>% 
+      ggplot() +
+      geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain)) +
+      geom_hline(aes(yintercept = true_value, alpha = true_value_NA), lty=2) +
+      scale_alpha_manual(values = c(1,0)) +
+      # geom_vline(xintercept = burn_in, lty=3, alpha = 0.5) +
+      facet_grid(.~season) +
+      theme_bw() + labs(y = Y_LAB) +
+      # scale_color_manual(values = var_cols) +
+      theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
+    
+  }
   
   if(var=='init_infected'){
     p <- p + scale_y_log10()

@@ -15,11 +15,12 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "inputs", "subtype_years.rds"),
            file.path("data", "dummy_data", "dummy_surveillance.rds"),
            file.path("data", "dummy_data", "known_parameters.rds"),
-           file.path("output", "data", "mcmc_samples_rates_unknown.rds"))
+           file.path("output", "data", "mcmc_samples.rds"))
 
 i <- as.numeric(commandArgs(trailingOnly = TRUE))
 
 source(file.path('scripts','setup','colors.R'))
+source(file.path('scripts','setup','base_functions.R'))
 source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
@@ -131,7 +132,7 @@ subtype_init_pars <- c(0.12, 0.5, rep(1, 2), 2.5,
 
 ## MCMC pars
 nchains <- 3
-burn_in <- 80000
+burn_in <- 50000
 thinning_value <- 5
 n_samples <- 30000
 

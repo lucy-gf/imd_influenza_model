@@ -234,12 +234,9 @@ ggsave(file.path('output','figures','dummy_infections','dummy_vacc_risk_props.pn
        width = 10, height = 10)
 
 #### VACCINE EFFICACY ####
-## (age-dependent, annual, eventually strain-specific)
-# TODO Make strain-specific
+## (age-dependent, annual, subtype-specific)
 
 #### AGAINST INFECTION ####
-# 2023/24: https://onlinelibrary.wiley.com/doi/epdf/10.1111/irv.70194
-# 2024/25: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025/influenza-in-the-uk-annual-epidemiological-report-winter-2024-to-2025#secondary-care-surveillance
 
 ## FOR NOW USING MADE UP DATA
 ## TODO UPDATE WHEN DATA AVAILABLE
