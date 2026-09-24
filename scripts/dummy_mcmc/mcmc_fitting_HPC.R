@@ -132,12 +132,18 @@ subtype_init_pars <- c(0.12, 0.5, rep(1, 2), 2.5,
 
 ## MCMC pars
 nchains <- 3
-burn_in <- 50000
+n_pop <- 10
+burn_in <- 0
 thinning_value <- 5
 n_samples <- 30000
 
+n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
+if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
+
+cat('\nn_cores: ', n_cores, '\n')
+
 mcmc_results <- run_mcmc_inference(
-  demography_input = demography, 
+  demography_input = demography,
   vaccinated_input = vaccinated_data_seasonal,
   subtype_season = subtype_seasons %>% filter(season == season_i),
   cm_input = pc_cm,
@@ -145,15 +151,14 @@ mcmc_results <- run_mcmc_inference(
   epid_periods = known_pars$epid_periods,
   coverage_rates = known_pars$proportion_observed,
   care_delays = delays,
-  initial_parameters = c(subtype_init_pars,
-                         subtype_init_pars,
-                         rep(0, 4)),
+  initial_parameters = c(subtype_init_pars,subtype_init_pars,rep(0, 4)),
   #   subtype-specific parameters x2, IMD spline parameters x4
-  n_samples = n_samples*nchains, 
-  nburn = burn_in*nchains, 
+  n_samples = n_samples*n_pop,
+  nburn = burn_in*n_pop,
   thinning = thinning_value,
-  n_chains = 1, # the DEzs sampler produces three subchains, dealt with by
-  # multiplying nburn and n_samples by 3
+  n_chains = 1,
+  n_pop = n_pop,
+  n_cores = n_cores,
   txt_output = i
 )
 
@@ -162,7 +167,7 @@ mcmc_results <- run_mcmc_inference(
 # save most recently run settings as a dummy save
 write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
                      HPC = T,
-                     date = Sys.Date()), .args[6]) 
+                     date = Sys.Date()), .args[6])
 
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_', i, '_', burn_in,'_',thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),

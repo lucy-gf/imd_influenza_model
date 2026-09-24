@@ -21,6 +21,7 @@ source(file.path('scripts','setup','colors.R'))
 source(file.path('scripts','setup','base_functions.R'))
 
 ## read in UKHSA data
+## from: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026#laboratory-surveillance
 ukhsa_dat <- read_ods(.args[1], sheet = 48, skip = 3)
 
 # rename columns

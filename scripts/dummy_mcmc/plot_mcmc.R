@@ -30,10 +30,6 @@ source(file.path('scripts','setup','base_functions.R'))
 source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
-if(!dir.exists(gsub('fitted_epidemics.png','',.args[length(.args)]))){
-  dir.create(gsub('fitted_epidemics.png','',.args[length(.args)]), recursive=T)
-}
-
 set.seed(60)
 
 figure_filename <- function(string){
@@ -211,7 +207,7 @@ read_and_get_samples <- function(i){
   }
   
   dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
-  list_samples <- mclapply(1:3, get_samples_parallel)
+  list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
   samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
   samples_out
@@ -249,6 +245,11 @@ n_seasons <- n_distinct(epid_pars$season)
 message('\n', length(total_fitted_pars),' fitted parameters, ', 
         n_subtype_seasons,' unique epidemics, over ', n_seasons,
         ' seasons.\n', sep = '')
+
+epids_actual <- n_distinct(mcmc_samples$epidemic)
+if(3 %in% unique(mcmc_samples$epidemic)){epids_actual <- epids_actual - 17/38}
+total_actual_fitted_pars <- (ncol(mcmc_samples) - 4)*epids_actual
+message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '')
 
 fitted_pars <- unique(epid_pars$name)
 fitted_pars <- fitted_pars[substr(fitted_pars, 1, 2) != 'R0']
@@ -325,6 +326,8 @@ ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_traces'),.args[le
 traces_filtered <- map(.x = plotting_cols, .f = ~{plot_trace(var=.x, filtered=T)})
 patchwork::wrap_plots(traces_filtered, nrow = 6) 
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), width = 30, height = 14)
+plot_trace(var="transmissibility", filtered=T)
+ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_filtered_trace'),.args[length(.args)]), width = 10, height = 5)
 log_likelihood_plot <- plot_trace('likelihood'); log_likelihood_plot
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 6)
 
@@ -358,8 +361,6 @@ colnames(pairs_wide) <- gsub('_spline_','_spline\n_', colnames(pairs_wide))
 
 pairs_wide[,chain_it_id := NULL]
 
-p <- ggpairs(pairs_wide, columns = 2:5, aes(color = as.factor(subtype_season), alpha = 0.5))
-print(p)
 p_FULL <- ggpairs(pairs_wide, columns = 2:ncol(pairs_wide), aes(color = as.factor(subtype_season), alpha = 0.5))
 ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_pairwise'),.args[length(.args)]),
        plot = p_FULL, width = 40, height = 40)

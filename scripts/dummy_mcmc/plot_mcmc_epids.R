@@ -403,7 +403,8 @@ plot_healthcare_rates <- function(i){
     filter(subtype == subtype_seasons$subtype[i],
            season == subtype_seasons$season[i]) %>% 
     mutate(name = gsub('_rate', ' care', name),
-           risk_level = paste0(risk_level, ' risk')) %>% 
+           risk_level = paste0(risk_level, ' risk'),
+           faceting_var = paste0(risk_level, ', ', name)) %>% 
     ggplot(aes(x = broad_age, group = imd_quintile, col = imd_quintile)) + 
     geom_errorbar(aes(ymin = l, ymax = u), width = 0.4,
                   position = position_dodge(width = 0.4), alpha=1) +
@@ -413,7 +414,7 @@ plot_healthcare_rates <- function(i){
                position = position_dodge(width = 0.4), stroke = 0.8) +
     theme_lg() +
     scale_color_manual(values = imd_quintile_colors) + 
-    facet_wrap(risk_level ~ name, scales = 'free', ncol = 2) + 
+    facet_wrap(faceting_var ~ ., scales = 'free', ncol = 2) + 
     # theme(legend.position = 'none') +
     scale_y_continuous(labels = scales::percent, limits = c(0,NA)) +
     labs(x = '', y = 'Healthcare attendance upon infection',
@@ -427,7 +428,7 @@ hc_plots <- map(.x = 1:nrow(subtype_seasons),
 
 patchwork::wrap_plots(hc_plots) + plot_layout(guides = 'collect')
 ggsave(gsub('data/posterior_epidemics.rds',figure_filename('healthcare_attendance'),.args[length(.args)]),
-       width = 20, height = 10)
+       width = 22, height = 15)
 
 ## add in start_date, reporting rates
 fitted_epidemics[, start_of_epidemic := as.Date(paste0('01-09-', year), format = '%d-%m-%Y')]
@@ -486,18 +487,22 @@ fitted_and_obs %>%
 ggsave(gsub('data/posterior_epidemics.rds',figure_filename('posterior_epidemics'),.args[length(.args)]),
        width = 30, height = 20)
 
-fitted_and_obs %>% filter(imd_quintile == 3, age_grp=='5-11', risk_level == 'low') %>% 
-  mutate(imd_quintile := paste0('IMD ', imd_quintile)) %>% 
+fitted_and_obs %>% filter(imd_quintile %in% c(1,3), age_grp=='5-11') %>% 
+  mutate(risk_level = paste0(risk_level, ' risk')) %>% 
   ggplot() + 
-  geom_ribbon(aes(date, ymin=l, ymax=u, group=age_grp, fill=age_grp), alpha=0.4) +
-  geom_line(aes(date, median, group=age_grp, col=age_grp)) +
-  geom_point(aes(date, infections, group=age_grp, col=age_grp), shape = 1, alpha = 0.6) +
+  geom_ribbon(aes(date, ymin=l, ymax=u, group=imd_quintile, fill=as.factor(imd_quintile)), alpha=0.4) +
+  geom_line(aes(date, median, group=imd_quintile, col=as.factor(imd_quintile)), lwd = 0.8) +
+  geom_point(aes(date, infections, group=imd_quintile, col=as.factor(imd_quintile)), size = 2) +
+  geom_point(aes(date, infections, group=imd_quintile), size = 0.5, col = 'white') +
   facet_grid(age_grp~imd_quintile, scales='free') + theme_bw() +
-  scale_color_manual(values = age_colors) +
-  scale_fill_manual(values = age_colors) +
+  scale_color_manual(values = imd_quintile_colors) +
+  scale_fill_manual(values = imd_quintile_colors) +
+  facet_grid(risk_level ~ age_grp, scales = 'free') +
   theme(legend.position = 'none',
         text = element_text(size=14)) +
   labs(y = 'infections')
+ggsave(gsub('data/posterior_epidemics.rds',figure_filename('kid_example_infections'),.args[length(.args)]),
+       width = 12, height = 10)
 
 fitted_and_obs %>% 
   mutate(imd_quintile := paste0('IMD ', imd_quintile)) %>% 
@@ -687,18 +692,23 @@ fitted_secondary_plot <- fitted_surv_agg %>%
 
 fitted_surv_agg %>%
   select(!observed_primary) %>% 
-  filter(imd_quintile == 'IMD 1', age_grp == '5-11') %>% 
+  filter(imd_quintile %in% c("IMD 1", "IMD 3"), age_grp == '5-11') %>% 
+  mutate(imd_quintile = substr(imd_quintile, 5, 5)) %>% 
   pivot_wider(names_from = measure, values_from = observed_secondary) %>% 
   ggplot() + 
-  geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,risk_level), fill=risk_level), 
+  geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,imd_quintile), fill=imd_quintile), 
               alpha=0.4) +
-  geom_line(aes(date, median, group=interaction(age_grp,risk_level), col=risk_level), lwd = 0.8) +
-  geom_point(aes(date, secondary_care, group=interaction(age_grp,risk_level), col=risk_level), 
-             shape = 1, stroke = 1) +
-  facet_grid(age_grp~imd_quintile, scales='free') + theme_bw() +
+  geom_line(aes(date, median, group=interaction(age_grp,imd_quintile), col=imd_quintile), lwd = 0.8) +
+  geom_point(aes(date, secondary_care, group=interaction(age_grp,imd_quintile), col=imd_quintile), size = 2) +
+  geom_point(aes(date, secondary_care, group=interaction(age_grp,imd_quintile)), size = 0.5, col = 'white') +
+  facet_grid(risk_level~age_grp, scales='free') + theme_bw() +
   theme(text = element_text(size=12)) +
+  scale_color_manual(values = imd_quintile_colors) +
+  scale_fill_manual(values = imd_quintile_colors) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
-  labs(y = 'Hospitalisations', x = '', col = 'Clinical risk', fill = 'Clinical risk')
+  labs(y = 'Hospitalisations', x = '')
+ggsave(gsub('data/posterior_epidemics.rds',figure_filename('example_kid_secondary_data'),.args[length(.args)]),
+       width = 12, height = 10)
 
 fitted_surv_agg %>%
   select(!observed_secondary) %>% 

@@ -413,7 +413,7 @@ epid_periods <- c(2, 3) # latent and infectious periods
 #### DELAYS ####
 ## (in weeks)
 primary_care_delay <- 1
-secondary_care_delay <- 2
+secondary_care_delay <- 1
 
 #### OPENSAFELY COVERAGE ####
 

@@ -6,6 +6,7 @@ suppressMessages(require(tidyverse))
 suppressMessages(require(data.table))
 suppressMessages(require(readr))
 options(dplyr.summarise.inform = FALSE) 
+library(patchwork)
 
 .args <- if (interactive()) c(
   file.path("data", "inputs", "imd_age_pop.rds"),
@@ -14,7 +15,7 @@ options(dplyr.summarise.inform = FALSE)
   file.path("data", "dummy_data", "unknown_parameters.rds"),
   file.path("data", "dummy_data", "dummy_infections.rds")
 ) else commandArgs(trailingOnly = TRUE)
-  
+
 source(file.path('scripts','setup', 'base_functions.R'))
 source(file.path('scripts','setup','colors.R'))
 source(file.path('scripts','seir_model.R'))
@@ -265,14 +266,17 @@ plot_final_size <- function(k){
     theme_bw() + 
     scale_fill_manual(values = imd_quintile_colors) +
     facet_grid(.~risk_level) +
-    labs(x = 'Age group', y = 'Final size (%)', fill = 'IMD quintile') +
+    labs(x = 'Age group', y = 'Attack rate (%)', fill = 'IMD quintile') +
     ggtitle(names(seasonal_seir_outputs)[k])
 
 }
 
 final_size_plots <- map(.x = 1:length(seasonal_seir_outputs), .f = plot_final_size)
 
-patchwork::wrap_plots(final_size_plots, nrow = 3)
+patchwork::wrap_plots(final_size_plots, nrow = 3) + patchwork::plot_layout(guides = 'collect')
+
+ggsave(file.path("output", "figures", "dummy_infections", "dummy_attack_rates.png"),
+       height = 12, width = 15)
 
 R_dat <- R_dat[, final_size := (rbindlist(seasonal_seir_outputs, idcol = "id") %>% 
                  group_by(id, age_grp, imd_quintile, risk_level, pop) %>% 
