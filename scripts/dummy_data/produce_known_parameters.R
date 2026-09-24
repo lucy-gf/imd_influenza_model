@@ -408,7 +408,8 @@ vaccinated_data <- rbind(vaccinated_pop %>% mutate(subtype = 'AH1N1'),
 
 #### EPI PERIODS ####
 
-epid_periods <- c(2, 3) # latent and infectious periods
+# from Baguelin et al., 2013
+epid_periods <- c(0.8, 1.8) # latent and infectious periods
 
 #### DELAYS ####
 ## (in weeks)

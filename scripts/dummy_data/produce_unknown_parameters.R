@@ -65,13 +65,11 @@ subtype_vec <- unique(subtype_years$subtype)
 
 #### EPIDEMIOLOGICAL PARAMETERS ####
 
-epid_periods <- c(2, 3) # latent and infectious periods
-
 ## adults' susceptibility, transmissibility
 epid_pars <- subtype_years %>% 
   select(year, subtype) %>% unique() %>% 
   mutate(susceptibility = rnorm(n = nrow(subtype_years), mean = 0.4, sd = 0.005),
-         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.12, sd = 0.001)) %>% 
+         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.2, sd = 0.001)) %>% 
   mutate(susceptibility = case_when(subtype == 'B' ~ 0.6*susceptibility, T ~ susceptibility),
          transmissibility = case_when(subtype == 'B' ~ 1.25*transmissibility, T ~ transmissibility))
 
@@ -110,9 +108,7 @@ rel_susceptibility %>%
 
 epid_parameters <- subtype_years %>% select(year, subtype) %>% 
   left_join(epid_pars, by = c('year','subtype')) %>% 
-  mutate(latent_period = epid_periods[1],
-         infectious_period = epid_periods[2],
-         start_date = as.Date(paste0('01-09-', year), "%d-%m-%Y"),
+  mutate(start_date = as.Date(paste0('01-09-', year), "%d-%m-%Y"),
          init_infected = floor(rnorm(n = nrow(subtype_years), mean = 300, sd = 10))) %>% 
   mutate(init_infected = case_when(subtype == 'B' ~ 0.4*init_infected, T ~ init_infected)) %>% 
   left_join(rel_susceptibility %>% mutate(broad_age = paste0('rel_susc_', broad_age)) %>% 

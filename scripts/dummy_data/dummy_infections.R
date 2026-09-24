@@ -81,7 +81,7 @@ subtype_seasons <- unknown_pars$epid_parameters %>%
 
 ## check R0
 cat('\n')
-R0_vec <- c(); Reff_vec <- c()
+Reff_vec <- c(); Reff_vacc_vec <- c()
 for(i in 1:nrow(subtype_seasons)){
   
     subtype_season_i <- subtype_seasons[i,]
@@ -108,23 +108,20 @@ for(i in 1:nrow(subtype_seasons)){
                                  
     if(sum(absolute_susceptibility > 1) > 0){stop('Some susceptibility over 100%')}
     
-    R0 <- R0_func(absolute_susceptibility,
-                  pars$infectious_period,
+    Reff <- R0_func(absolute_susceptibility,
+                  known_pars$epid_periods[2],
                   pars$transmissibility,
                   cm)
-    Reff <- R0_func((1 - v_p$eff_v_p)*rep(absolute_susceptibility, 5),
-                    pars$infectious_period,
+    Reff_vacc <- R0_func((1 - v_p$eff_v_p)*rep(absolute_susceptibility, 5),
+                         known_pars$epid_periods[2],
                     pars$transmissibility,
                     cm)
-    # cat('R0 = ', round(R0,3), ', ',
-    #     'Reff = ', round(Reff,3),
-    #     '\n', sep = '')
     
-    R0_vec <- c(R0_vec, R0); Reff_vec <- c(Reff_vec, Reff)
+    Reff_vec <- c(Reff_vec, Reff); Reff_vacc_vec <- c(Reff_vacc_vec, Reff_vacc)
   
 }
 
-R_dat <- data.table(subtype_seasons %>% mutate(R0 = R0_vec, Reff = Reff_vec))
+R_dat <- data.table(subtype_seasons %>% mutate(Reff = Reff_vec, Reff_vacc = Reff_vacc_vec))
 print(R_dat)
 
 #### EXPAND CONTACT MATRIX ####
@@ -192,8 +189,8 @@ for(i in 1:nrow(subtype_seasons)){
     cm = pc_cm,
     trans = pars$transmissibility,
     susc = susceptibility_vec,
-    lat_per = pars$latent_period,
-    inf_per = pars$infectious_period
+    lat_per = known_pars$epid_periods[1],
+    inf_per = known_pars$epid_periods[2]
   )
   
   # check not rising at end of time
@@ -304,9 +301,9 @@ plot_weekly_props <- function(year_i){
     labs(x = 'Day of epidemic', y = 'Infected proportion', fill = '',
          title = year_i,
          subtitle = paste0(
-           dat_vec$subtype, ': R0 ',
-           round(dat_vec$R0, 2), ', Reff ',
-           round(dat_vec$Reff, 2), ', AR ',
+           dat_vec$subtype, ': Reff ',
+           round(dat_vec$Reff, 2), ', Reff_V ',
+           round(dat_vec$Reff_vacc, 2), ', AR ',
            100*round(dat_vec$final_size, 4), '%', collapse = '\n'))
 
  }
