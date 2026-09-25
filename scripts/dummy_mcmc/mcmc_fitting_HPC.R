@@ -123,7 +123,7 @@ demography <- vaccinated_data_seasonal_no_rep %>%
 tot_pop <- sum(imd_age_pop$pop)
 if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
 
-subtype_init_pars <- c(0.12, rep(0.5, 3), 2.5, 
+subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5, 
                        rep(0.02, 6), rep(0.002, 6))
 # c(transmissibility, 3x absolute susceptibility, log of initial infected, 
 #   reporting rates for primary care, reporting rates for secondary care)

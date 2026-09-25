@@ -376,6 +376,8 @@ beta_pars <- function(mean, concentration) {
 
 prim_beta  <- beta_pars(0.02, 200) 
 sec_beta   <- beta_pars(0.005, 200)
+shape1_susc <- 2
+shape2_susc <- 2
 reff_mean <- 2
 reff_sd   <- 0.4
 imd_mean <- 0
@@ -396,9 +398,11 @@ prior_values <- data.table(
   reff_values = seq(min_reff, max_reff, length.out = nsamps),
   reff_samples = rnorm(nsamps, mean = reff_mean, sd = reff_sd),
   reff_distr = dnorm(seq(min_reff, max_reff, length.out = nsamps), mean = reff_mean, sd = reff_sd),
-  adult_susc_values = seq(min_susc, max_susc, length.out = nsamps),
-  adult_susc_distr = dunif(seq(min_susc, max_susc, length.out = nsamps), min_susc, max_susc),
-  adult_susc_samples = runif(nsamps, min_susc, max_susc),
+  susc_values = seq(min_susc, max_susc, length.out = nsamps),
+  susc_distr = dbeta(seq(min_susc, max_susc, length.out = nsamps), shape1_susc, shape2_susc),
+  c_susc_samples = rbeta(nsamps, shape1_susc, shape2_susc),
+  a_susc_samples = rbeta(nsamps, shape1_susc, shape2_susc),
+  oa_susc_samples = rbeta(nsamps, shape1_susc, shape2_susc),
   imd_spline_values = seq(min_spline, max_spline, length.out = nsamps),
   imd_spline_distr = dnorm(seq(min_spline, max_spline, length.out = nsamps), mean = imd_mean, sd = imd_sd),
   imd_spline_samples = rnorm(nsamps, mean = imd_mean, sd = imd_sd),
@@ -408,8 +412,6 @@ prior_values <- data.table(
   reporting_values = seq(min_reporting, max_reporting, length.out = nsamps),
   prim_rates = dbeta(seq(min_reporting, max_reporting, length.out = nsamps), shape1 = prim_beta['a'], shape2 = prim_beta['b']),
   sec_rates = dbeta(seq(min_reporting, max_reporting, length.out = nsamps), shape1 = sec_beta['a'], shape2 = sec_beta['b']),
-  child_rel_susc_samples = 0,
-  older_adults_rel_susc_samples = 0,
   transmissibility = 0,
   imd_1_value = 0
 )
@@ -417,19 +419,18 @@ prior_values <- data.table(
 pb <- txtProgressBar(min = 1, max = nrow(prior_values), style = 3)
 
 for(i in 1:nrow(prior_values)){
-  prior_values$child_rel_susc_samples[i] <- runif(1, min_rel_susc, min(c(1/prior_values$adult_susc_samples[i], max_rel_susc)))
-  prior_values$older_adults_rel_susc_samples[i] <- runif(1, min_rel_susc, min(c(1/prior_values$adult_susc_samples[i], max_rel_susc)))
-  
-  prior_values$transmissibility[i] <- reff_func(
-    susceptibility    = fcn_assign_ages(prior_values$adult_susc_samples[i]*prior_values$child_rel_susc_samples[i], 
-                                        prior_values$adult_susc_samples[i], 
-                                        prior_values$adult_susc_samples[i]*prior_values$older_adults_rel_susc_samples[i], age_labels),
+
+  prior_values$transmissibility[i] <- R0_func(
+    susceptibility    = fcn_assign_ages(prior_values$c_susc_samples[i],
+                                        prior_values$a_susc_samples[i], 
+                                        prior_values$oa_susc_samples[i],
+                                        age_labels),
     inf_period        = epid_periods[2],
     beta_in           = 1,
     cm_in             = cm_input,
     per_capita        = TRUE,
     population_vector = demography_input$population,
-    reffassumed         = prior_values$reff_samples[i],
+    R0assumed         = prior_values$reff_samples[i],
     return_beta       = TRUE
   )
   
@@ -457,19 +458,19 @@ reff_plot <- prior_values %>%
         axis.text.y=element_blank(),
         axis.ticks.y=element_blank()); reff_plot
 
-adult_susc_plot <- prior_values %>%
+susc_plot <- prior_values %>%
   ggplot() +
-  geom_ribbon(aes(x = adult_susc_values, ymax = adult_susc_distr, ymin = 0), fill = '#820263',
+  geom_ribbon(aes(x = susc_values, ymax = susc_distr, ymin = 0), fill = '#820263',
               alpha = 0.4) +
-  geom_line(aes(x = adult_susc_values, y = adult_susc_distr), col = '#820263',
+  geom_line(aes(x = susc_values, y = susc_distr), col = '#820263',
             lwd = 0.8) +
   # geom_vline(xintercept = min_trans, lty = 2, alpha = 0.5, lwd = 0.8) + 
   # geom_vline(xintercept = max_trans, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  labs(y = '', x = 'adult susceptibility') + 
+  labs(y = '', x = 'susceptibility') + 
   theme_lg() +
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
-        axis.ticks.y=element_blank()); adult_susc_plot
+        axis.ticks.y=element_blank()); susc_plot
 
 trans_plot <- prior_values %>% 
   ggplot() +
@@ -477,23 +478,11 @@ trans_plot <- prior_values %>%
                alpha = 0.4, lwd = 0.8) +
   # geom_vline(xintercept = min_trans, lty = 2, alpha = 0.5, lwd = 0.8) + 
   # geom_vline(xintercept = max_trans, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  labs(y = '', x = 'transmissibility') + 
+  labs(y = '', x = 'transmissibility') + xlim(c(0,1)) +
   theme_lg() +
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
         axis.ticks.y=element_blank()); trans_plot
-
-rel_susc_plot <- prior_values %>% 
-  ggplot() +
-  geom_density(aes((child_rel_susc_samples + older_adults_rel_susc_samples)/2), col = '#04A777', fill = '#04A777',
-               alpha = 0.4, lwd = 0.8) +
-  # geom_vline(xintercept = min_rel_susc, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  # geom_vline(xintercept = max_rel_susc, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  labs(y = '', x = "relative children's/\nolder adults' susceptibility") + 
-  theme_lg() +
-  theme(axis.title.y=element_blank(),
-        axis.text.y=element_blank(),
-        axis.ticks.y=element_blank()); rel_susc_plot
 
 init_inf_plot <- prior_values %>% 
   ggplot() +
@@ -575,7 +564,7 @@ secondary_plot <- prior_values %>%
         axis.text.y=element_blank(),
         axis.ticks.y=element_blank()); secondary_plot
 
-reff_plot + adult_susc_plot + rel_susc_plot + trans_plot + init_inf_plot + init_inf_plot_10 +
+reff_plot + susc_plot + trans_plot + init_inf_plot + init_inf_plot_10 +
   primary_plot + secondary_plot + imd_spline_plot + imd_1_plot
 ggsave(gsub("epids.png", "prior_pars.png", .args[2]), width = 12, height = 10, dpi = 600)
  

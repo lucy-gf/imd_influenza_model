@@ -432,8 +432,8 @@ run_mcmc_inference <- function(
       pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
     # Uniform prior on transmissibility 
     lprob <- lprob + dunif(unname(pars[1]), min = min_trans, max = max_trans, log = TRUE)
-    # Uniform prior on susceptibility, x2
-    lprob <- lprob + sum(dunif(unname(pars[2:4]), min = min_susc, max = max_susc, log = TRUE))
+    # Beta prior on susceptibility
+    lprob <- lprob + sum(dbeta(unname(pars[2:4]), shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
     # Uniform prior on initial infected
     lprob <- lprob + dunif(unname(pars[5]), min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
     # Beta prior on primary care reporting rates (pars 5:10), centred at 2%
@@ -454,7 +454,7 @@ run_mcmc_inference <- function(
       
       lprob <- lprob + dunif(unname(pars[1 + n_pars_per_subtype]), min = min_trans, max = max_trans, log = TRUE)
       
-      lprob <- lprob + sum(dunif(unname(pars[2 + n_pars_per_subtype])*c(1, unname(pars[3:4 + n_pars_per_subtype])), min = min_susc, max = max_susc, log = TRUE))
+      lprob <- lprob + sum(dbeta(unname(pars[2:4 + n_pars_per_subtype]), shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
       
       lprob <- lprob + dunif(unname(pars[5 + n_pars_per_subtype]), min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
       
@@ -483,6 +483,9 @@ run_mcmc_inference <- function(
   # Primary care: centred at 0.02, secondary: centred at 0.005
   prim_beta  <- beta_pars(0.02, 200) 
   sec_beta   <- beta_pars(0.005, 200)
+  # Susceptibility beta distributed, mean at 0.5
+  shape1_susc <- 2
+  shape2_susc <- 2
   # R0 centred at 2 
   r0_mean <- 2
   r0_sd   <- 0.4
@@ -524,8 +527,8 @@ run_mcmc_inference <- function(
           if (R0_1 >= min_r0 && R0_1 <= max_r0 && R0_2 >= min_r0 && R0_2 <= max_r0) break
         }
         
-        susc_1 <- runif(3, min_susc, max_susc)
-        susc_2 <- runif(3, min_susc, max_susc)
+        susc_1 <- rbeta(3, shape1_susc, shape2_susc)
+        susc_2 <- rbeta(3, shape1_susc, shape2_susc)
         
         trans_1 <- R0_func(
           susceptibility    = fcn_assign_ages(susc_1[1],
