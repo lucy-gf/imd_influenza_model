@@ -376,16 +376,16 @@ beta_pars <- function(mean, concentration) {
 
 prim_beta  <- beta_pars(0.02, 200) 
 sec_beta   <- beta_pars(0.005, 200)
-r0_mean <- 2
-r0_sd   <- 0.4
+reff_mean <- 2
+reff_sd   <- 0.4
 imd_mean <- 0
 imd_sd <- 0.5
 
 min_trans <- 0; max_trans <- 1
 min_susc <- 0; max_susc <- 1
 min_rel_susc <- 1/10; max_rel_susc <- 5
-min_r0 <- 1; max_r0 <- 4
-min_log_init_inf <- 0; max_log_init_inf <- log10(min(demography_input$population))
+min_reff <- 1; max_reff <- 4
+min_log_init_inf <- 0; max_log_init_inf <- 4
 min_reporting <- 0; max_reporting <- 1
 min_spline <- -log(5); max_spline <- log(5) # equivalent to IMD ratios at most
 
@@ -393,9 +393,9 @@ min_spline <- -log(5); max_spline <- log(5) # equivalent to IMD ratios at most
 nsamps <- 10000
 
 prior_values <- data.table(
-  r0_values = seq(min_r0, max_r0, length.out = nsamps),
-  r0_samples = rnorm(nsamps, mean = r0_mean, sd = r0_sd),
-  r0_distr = dnorm(seq(min_r0, max_r0, length.out = nsamps), mean = r0_mean, sd = r0_sd),
+  reff_values = seq(min_reff, max_reff, length.out = nsamps),
+  reff_samples = rnorm(nsamps, mean = reff_mean, sd = reff_sd),
+  reff_distr = dnorm(seq(min_reff, max_reff, length.out = nsamps), mean = reff_mean, sd = reff_sd),
   adult_susc_values = seq(min_susc, max_susc, length.out = nsamps),
   adult_susc_distr = dunif(seq(min_susc, max_susc, length.out = nsamps), min_susc, max_susc),
   adult_susc_samples = runif(nsamps, min_susc, max_susc),
@@ -420,7 +420,7 @@ for(i in 1:nrow(prior_values)){
   prior_values$child_rel_susc_samples[i] <- runif(1, min_rel_susc, min(c(1/prior_values$adult_susc_samples[i], max_rel_susc)))
   prior_values$older_adults_rel_susc_samples[i] <- runif(1, min_rel_susc, min(c(1/prior_values$adult_susc_samples[i], max_rel_susc)))
   
-  prior_values$transmissibility[i] <- R0_func(
+  prior_values$transmissibility[i] <- reff_func(
     susceptibility    = fcn_assign_ages(prior_values$adult_susc_samples[i]*prior_values$child_rel_susc_samples[i], 
                                         prior_values$adult_susc_samples[i], 
                                         prior_values$adult_susc_samples[i]*prior_values$older_adults_rel_susc_samples[i], age_labels),
@@ -429,7 +429,7 @@ for(i in 1:nrow(prior_values)){
     cm_in             = cm_input,
     per_capita        = TRUE,
     population_vector = demography_input$population,
-    R0assumed         = prior_values$r0_samples[i],
+    reffassumed         = prior_values$reff_samples[i],
     return_beta       = TRUE
   )
   
@@ -443,19 +443,19 @@ close(pb)
 prior_values <- prior_values %>% 
   filter(transmissibility >= min_trans & transmissibility <= max_trans)
 
-r0_plot <- prior_values %>% 
+reff_plot <- prior_values %>% 
   ggplot() +
-  geom_ribbon(aes(x = r0_values, ymax = r0_distr, ymin = 0), fill = '#F75C03',
+  geom_ribbon(aes(x = reff_values, ymax = reff_distr, ymin = 0), fill = '#F75C03',
               alpha = 0.4) +
-  geom_line(aes(x = r0_values, y = r0_distr), col = '#F75C03',
+  geom_line(aes(x = reff_values, y = reff_distr), col = '#F75C03',
                lwd = 0.8) +
-  # geom_vline(xintercept = min_r0, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  # geom_vline(xintercept = max_r0, lty = 2, alpha = 0.5, lwd = 0.8) + 
-  labs(y = '', x = 'R0') + 
+  # geom_vline(xintercept = min_reff, lty = 2, alpha = 0.5, lwd = 0.8) + 
+  # geom_vline(xintercept = max_reff, lty = 2, alpha = 0.5, lwd = 0.8) + 
+  labs(y = '', x = 'reff') + 
   theme_lg() + 
   theme(axis.title.y=element_blank(),
         axis.text.y=element_blank(),
-        axis.ticks.y=element_blank()); r0_plot
+        axis.ticks.y=element_blank()); reff_plot
 
 adult_susc_plot <- prior_values %>%
   ggplot() +
@@ -575,7 +575,7 @@ secondary_plot <- prior_values %>%
         axis.text.y=element_blank(),
         axis.ticks.y=element_blank()); secondary_plot
 
-r0_plot + adult_susc_plot + rel_susc_plot + trans_plot + init_inf_plot + init_inf_plot_10 +
+reff_plot + adult_susc_plot + rel_susc_plot + trans_plot + init_inf_plot + init_inf_plot_10 +
   primary_plot + secondary_plot + imd_spline_plot + imd_1_plot
 ggsave(gsub("epids.png", "prior_pars.png", .args[2]), width = 12, height = 10, dpi = 600)
  

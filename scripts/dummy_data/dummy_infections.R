@@ -100,9 +100,9 @@ for(i in 1:nrow(subtype_seasons)){
                                                     subtype == subtype_season_i$subtype)
     
     absolute_susceptibility <- fcn_assign_ages(
-      pars$susceptibility*pars$rel_susc_children,
-      pars$susceptibility,
-      pars$susceptibility*pars$rel_susc_older_adults,
+      pars$children_susceptibility,
+      pars$adults_susceptibility,
+      pars$older_adults_susceptibility,
       age_labels
     )
                                  
@@ -175,9 +175,9 @@ for(i in 1:nrow(subtype_seasons)){
   if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
   
   susceptibility_vec <- fcn_assign_ages(
-    pars$susceptibility*pars$rel_susc_children,
-    pars$susceptibility,
-    pars$susceptibility*pars$rel_susc_older_adults,
+    pars$children_susceptibility,
+    pars$adults_susceptibility,
+    pars$older_adults_susceptibility,
     age_labels
   )
   
@@ -297,7 +297,7 @@ plot_weekly_props <- function(year_i){
              stat = 'identity', position = 'stack', width = 1) + 
     theme_bw() + 
     scale_fill_manual(values = subtype_colors, labels = subtype_names) +
-    facet_wrap(.~age_grp) +
+    facet_wrap(.~age_grp, scales = 'free') +
     labs(x = 'Day of epidemic', y = 'Infected proportion', fill = '',
          title = year_i,
          subtitle = paste0(

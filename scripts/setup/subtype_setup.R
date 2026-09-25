@@ -172,15 +172,28 @@ subtype_info <- subtype_info_raw %>%
   group_by(season, week, total_tests) %>% 
   mutate(tot_pos = sum(value)) %>% ungroup() %>% 
   mutate(proportion = value/tot_pos,
-         subtype = convert_to_subtype(subtype)) %>% select(!tot_pos)
+         subtype = convert_to_subtype(subtype)) %>% select(!tot_pos) %>% 
+  group_by(season, week) %>% mutate(total_flu = sum(value)) %>% ungroup()
 
-subtype_info %>% 
+plot_subtype_data <- subtype_info %>% filter(!is.na(proportion)) %>% 
+  group_by(season) %>% mutate(max_pos_tests = max(total_flu), week_max = total_flu == max_pos_tests)
+
+plot_subtype_data %>% 
   ggplot() + 
   geom_bar(aes(week, proportion, fill = subtype),
-           position = 'stack', stat = 'identity') +
-  theme_bw() +
+           position = 'stack', stat = 'identity', width = 1) +
+  geom_line(aes(week, total_flu/max(total_flu)), lwd = 1) +
+  geom_label(data = plot_subtype_data %>% filter(week_max),
+             aes(week + 6, -0.1 + total_flu/max(total_flu) + 0.15*(max_pos_tests != max(total_flu)),
+                label = paste0('max. positive flu\ntests: ', max_pos_tests)), alpha = 0.4) + 
+  theme_minimal() +
   scale_fill_manual(values = subtype_colors) +
-  facet_grid(season ~ .)
+  scale_alpha_manual(values = c(0,1)) +
+  scale_y_continuous(expand = expansion(c(0,0))) +
+  scale_x_continuous(expand = expansion(c(0,0))) +
+  facet_grid(season ~ .) + labs(y = 'proportion of positive flu tests')
+ggsave(file.path('output','figures','dummy_infections','ukhsa_subtypes.png'),
+       width = 10, height = 10)
   
 write_rds(subtype_info, .args[2])
 

@@ -49,13 +49,11 @@ run_mcmc_inference <- function(
     ##----------------------------##
     
     transmissibility_1 <- pars[1]
-    
-    adult_susceptibility_1 <- pars[2]
-    rel_susceptibility_1 <- susc_vector(pars[3:4]) 
+     
     susceptibility_vec_1 <- fcn_assign_ages(
-      adult_susceptibility_1*rel_susceptibility_1[1],
-      adult_susceptibility_1,
-      adult_susceptibility_1*rel_susceptibility_1[2],
+      pars[2],
+      pars[3],
+      pars[4],
       age_labels
     )
     
@@ -109,12 +107,10 @@ run_mcmc_inference <- function(
       
       transmissibility_2 <- pars[1 + n_pars_per_subtype]
       
-      adult_susceptibility_2 <- pars[2 + n_pars_per_subtype]
-      rel_susceptibility_2 <- susc_vector(pars[3:4 + n_pars_per_subtype]) 
       susceptibility_vec_2 <- fcn_assign_ages(
-        adult_susceptibility_2*rel_susceptibility_2[1],
-        adult_susceptibility_2,
-        adult_susceptibility_2*rel_susceptibility_2[2],
+        pars[2 + n_pars_per_subtype],
+        pars[3 + n_pars_per_subtype],
+        pars[4 + n_pars_per_subtype],
         age_labels
       )
       
@@ -376,15 +372,15 @@ run_mcmc_inference <- function(
     # pars[5] is log of initial infected on 1st september
     
     susceptibility_vec_1 <- fcn_assign_ages(
-      pars[2]*pars[3],
       pars[2],
-      pars[2]*pars[4],
+      pars[3],
+      pars[4],
       age_labels
     )
     susceptibility_vec_2 <- fcn_assign_ages(
-      pars[2 + n_pars_per_subtype]*pars[3 + n_pars_per_subtype],
       pars[2 + n_pars_per_subtype],
-      pars[2 + n_pars_per_subtype]*pars[4 + n_pars_per_subtype],
+      pars[3 + n_pars_per_subtype],
+      pars[4 + n_pars_per_subtype],
       age_labels
     )
     
@@ -437,7 +433,7 @@ run_mcmc_inference <- function(
     # Uniform prior on transmissibility 
     lprob <- lprob + dunif(unname(pars[1]), min = min_trans, max = max_trans, log = TRUE)
     # Uniform prior on susceptibility, x2
-    lprob <- lprob + sum(dunif(unname(pars[2])*c(1, unname(pars[3:4])), min = min_susc, max = max_susc, log = TRUE))
+    lprob <- lprob + sum(dunif(unname(pars[2:4]), min = min_susc, max = max_susc, log = TRUE))
     # Uniform prior on initial infected
     lprob <- lprob + dunif(unname(pars[5]), min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
     # Beta prior on primary care reporting rates (pars 5:10), centred at 2%
@@ -497,23 +493,22 @@ run_mcmc_inference <- function(
   ## set bounds
   min_trans <- 0; max_trans <- 1
   min_susc <- 0; max_susc <- 1
-  min_rel_susc <- 1/10; max_rel_susc <- 10
   min_r0 <- 1; max_r0 <- 4
-  min_log_init_inf <- 0; max_log_init_inf <- log10(min(demography_input$population))
+  min_log_init_inf <- 0; max_log_init_inf <- 4
   min_reporting <- 0; max_reporting <- 1
   min_spline <- -log(5); max_spline <- log(5) # equivalent to IMD ratios at most
   # 5x higher/lower than each other in IMD 1 vs 3 or IMD 5 vs 3,
   # which would lead to huge ratios between IMD 1 and IMD 5 at the extremes
   
   ## set up sampler
-  lower_vals <- c(min_trans, min_susc, rep(min_rel_susc, 2), min_log_init_inf,
+  lower_vals <- c(min_trans, rep(min_susc, 3), min_log_init_inf,
                   rep(min_reporting, 12),
-                  min_trans, min_susc, rep(min_rel_susc, 2), min_log_init_inf,
+                  min_trans, rep(min_susc, 3), min_log_init_inf,
                   rep(min_reporting, 12),
                   rep(min_spline, 4))
-  upper_vals <- c(max_trans, max_susc, rep(max_rel_susc, 2), max_log_init_inf,
+  upper_vals <- c(max_trans, rep(max_susc, 3), max_log_init_inf,
                   rep(max_reporting, 12),
-                  max_trans, max_susc, rep(max_rel_susc, 2), max_log_init_inf,
+                  max_trans, rep(max_susc, 3), max_log_init_inf,
                   rep(max_reporting, 12),
                   rep(max_spline, 4))
   
@@ -529,20 +524,14 @@ run_mcmc_inference <- function(
           if (R0_1 >= min_r0 && R0_1 <= max_r0 && R0_2 >= min_r0 && R0_2 <= max_r0) break
         }
         
-        adult_susc_1 <- runif(1, min_susc, max_susc)
-        upper_susc_1 <- min(c(1/adult_susc_1, max_rel_susc))
-        child_rel_susc_1 <- runif(1, min_rel_susc, upper_susc_1)
-        older_adult_rel_susc_1 <- runif(1, min_rel_susc, upper_susc_1)
-        
-        adult_susc_2 <- runif(1, min_susc, max_susc)
-        upper_susc_2 <- min(c(1/adult_susc_2, max_rel_susc))
-        child_rel_susc_2 <- runif(1, min_rel_susc, upper_susc_2)
-        older_adult_rel_susc_2 <- runif(1, min_rel_susc, upper_susc_2)
+        susc_1 <- runif(3, min_susc, max_susc)
+        susc_2 <- runif(3, min_susc, max_susc)
         
         trans_1 <- R0_func(
-          susceptibility    = fcn_assign_ages(adult_susc_1*child_rel_susc_1, 
-                                              adult_susc_1, 
-                                              adult_susc_1*older_adult_rel_susc_1, age_labels),
+          susceptibility    = fcn_assign_ages(susc_1[1],
+                                              susc_1[2],
+                                              susc_1[3], 
+                                              age_labels),
           inf_period        = epid_periods[2],
           beta_in           = 1,
           cm_in             = cm_input,
@@ -553,9 +542,10 @@ run_mcmc_inference <- function(
         )
         
         trans_2 <- R0_func(
-          susceptibility    = fcn_assign_ages(adult_susc_2*child_rel_susc_2, 
-                                              adult_susc_2, 
-                                              adult_susc_2*older_adult_rel_susc_2, age_labels),
+          susceptibility    = fcn_assign_ages(susc_2[1],
+                                              susc_2[2],
+                                              susc_2[3],  
+                                              age_labels),
           inf_period        = epid_periods[2],
           beta_in           = 1,
           cm_in             = cm_input,
@@ -571,11 +561,7 @@ run_mcmc_inference <- function(
       
       # Check trans is within bounds
       if(trans_1 < min_trans | trans_1 > max_trans |
-         trans_2 < min_trans | trans_2 > max_trans |
-         child_rel_susc_1 > max_rel_susc |
-         older_adult_rel_susc_1 > max_rel_susc |
-         child_rel_susc_2 > max_rel_susc |
-         older_adult_rel_susc_2 > max_rel_susc) next
+         trans_2 < min_trans | trans_2 > max_trans ) next
       
       ## IMD splines normal around 0, SD = 0.5
       imd_spline_samples <- rnorm(4, mean = imd_mean, sd = imd_sd) 
@@ -591,11 +577,11 @@ run_mcmc_inference <- function(
       sec_rates_2  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
       
       out[j, ] <- c(
-        trans_1, adult_susc_1, child_rel_susc_1, older_adult_rel_susc_1,
+        trans_1, susc_1,
         runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
         prim_rates_1,                                     # primary care rates
         sec_rates_1,                                      # secondary care rates
-        trans_2, adult_susc_2, child_rel_susc_2, older_adult_rel_susc_2,
+        trans_2, susc_2,
         runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
         prim_rates_2,                                     # primary care rates
         sec_rates_2,                                      # secondary care rates

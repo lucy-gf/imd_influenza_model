@@ -14,7 +14,7 @@ options(dplyr.summarise.inform = FALSE)
   file.path("data", "dummy_data", "unknown_parameters.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
-set.seed(60)
+set.seed(60) 
 
 source(file.path("scripts","setup","colors.R"))
 source(file.path('scripts','setup','base_functions.R'))
@@ -58,62 +58,44 @@ broad_ages_care_rates <- data.table(
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
 subtype_years <- read_rds(.args[2])
-subtype_years <- subtype_years %>% 
+subtype_years <- subtype_years %>% ungroup() %>% 
   select(season, subtype) %>% unique() %>% 
   mutate(year = as.numeric(substr(season, 1, 4)))
 subtype_vec <- unique(subtype_years$subtype)
 
 #### EPIDEMIOLOGICAL PARAMETERS ####
 
-## adults' susceptibility, transmissibility
+## susceptibility, transmissibility
+
+susc_sd <- 0.02
+
 epid_pars <- subtype_years %>% 
   select(year, subtype) %>% unique() %>% 
-  mutate(susceptibility = rnorm(n = nrow(subtype_years), mean = 0.4, sd = 0.005),
-         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.2, sd = 0.001)) %>% 
-  mutate(susceptibility = case_when(subtype == 'B' ~ 0.6*susceptibility, T ~ susceptibility),
-         transmissibility = case_when(subtype == 'B' ~ 1.25*transmissibility, T ~ transmissibility))
-
-## relative susceptibility (relative to adults' susceptibility)
-rel_susceptibility <- data.table(cross_join(
-  subtype_years %>% 
-    select(year, subtype) %>% unique(),
-  data.table(broad_age = c('children','older_adults'),
-             rel_susceptibility = c(1.5, 1.1))
-))
-
-rel_susceptibility[year == 2023 & broad_age == 'children', rel_susceptibility := rel_susceptibility*(1.01)]
-rel_susceptibility[year == 2023 & broad_age == 'older_adults', rel_susceptibility := rel_susceptibility*(0.96)]
-rel_susceptibility[year == 2024 & broad_age == 'older_adults', rel_susceptibility := rel_susceptibility*(1.02)]
-rel_susceptibility[year == 2025 & broad_age == 'children', rel_susceptibility := rel_susceptibility*(0.98)]
-rel_susceptibility[subtype == 'B' & broad_age == 'children', rel_susceptibility := rel_susceptibility*(1.3)]
-rel_susceptibility[subtype == 'B' & broad_age == 'older_adults', rel_susceptibility := rel_susceptibility*(0.5)]
-rel_susceptibility[subtype == 'AH3N2' & broad_age == 'children', rel_susceptibility := rel_susceptibility*(1.01)]
-rel_susceptibility[subtype == 'AH3N2' & broad_age == 'older_adults', rel_susceptibility := rel_susceptibility*(0.99)]
-if(nrow(rel_susceptibility[rel_susceptibility<0])>0){stop('Negative rel_susceptibility')}
-
-setorder(rel_susceptibility, year, subtype)
-
-rel_susceptibility %>% 
-  ggplot() + 
-  geom_bar(aes(x = broad_age, y = rel_susceptibility, fill = subtype), 
-             position = 'dodge', stat = 'identity', width = 1) +
-  scale_shape_manual(values = c(1, 2, 4)) +
-  scale_fill_manual(values = subtype_colors) +
-  theme_bw() + labs(x = 'Age group', 
-                    y = 'Relative susceptibility') +
-  facet_grid(. ~ year) +
-  theme(text = element_text(size = 14))
+  mutate(children_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.55, sd = susc_sd),
+         adults_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.45, sd = susc_sd),
+         older_adults_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.4, sd = susc_sd),
+         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.18, sd = 0.001)) %>% 
+  # manual adjustments
+  mutate(children_susceptibility = case_when(subtype == 'B' ~ 0.8*children_susceptibility, 
+                                             year == 2025 ~ 1.2*children_susceptibility, 
+                                             T ~ children_susceptibility),
+         adults_susceptibility = case_when(subtype == 'B' ~ 0.7*adults_susceptibility, 
+                                           year == 2025 ~ 1.2*adults_susceptibility, 
+                                           T ~ adults_susceptibility),
+         older_adults_susceptibility = case_when(subtype == 'B' ~ 0.4*older_adults_susceptibility, 
+                                                 year == 2025 ~ 1.2*older_adults_susceptibility, 
+                                                 T ~ older_adults_susceptibility),
+         transmissibility = case_when(subtype == 'B' ~ 1.27*transmissibility, 
+                                      year == 2025 ~ 0.9*transmissibility, 
+                                      T ~ transmissibility))
 
 #### MAKE INTO DATA TABLE ####
 
 epid_parameters <- subtype_years %>% select(year, subtype) %>% 
   left_join(epid_pars, by = c('year','subtype')) %>% 
   mutate(start_date = as.Date(paste0('01-09-', year), "%d-%m-%Y"),
-         init_infected = floor(rnorm(n = nrow(subtype_years), mean = 300, sd = 10))) %>% 
-  mutate(init_infected = case_when(subtype == 'B' ~ 0.4*init_infected, T ~ init_infected)) %>% 
-  left_join(rel_susceptibility %>% mutate(broad_age = paste0('rel_susc_', broad_age)) %>% 
-              pivot_wider(names_from = broad_age, values_from = rel_susceptibility),
-            by = c('year','subtype'))
+         init_infected = floor(rnorm(n = nrow(subtype_years), mean = 200, sd = 10))) %>% 
+  mutate(init_infected = case_when(subtype == 'B' ~ 60, T ~ init_infected)) 
 
 #### IHRs AND IGPRs ####
 
@@ -295,9 +277,7 @@ plot_epi_par <- function(par_name){
   
 }
 
-epi_plots <- map(.x = c('transmissibility', 'susceptibility', 
-                        'rel_susc_children', 'rel_susc_older_adults',
-                        'init_infected'),
+epi_plots <- map(.x = colnames(epid_parameters)[!colnames(epid_parameters) %in% c('year', 'subtype', 'start_date')],
     .f = plot_epi_par)
 
 patchwork::wrap_plots(epi_plots, guides = 'collect')
