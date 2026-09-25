@@ -255,7 +255,9 @@ run_mcmc_inference <- function(
         modelled_proportion = epi_data_1[[1]]/(epi_data_1[[1]] + epi_data_2[[1]])
       ) %>% drop_na()
       
-      weekly_true_proportions <- subtype_season %>% filter(subtype == epidemic_1) %>% select(date_formatted, proportion)
+      weekly_true_proportions <- subtype_season %>% filter(subtype == epidemic_1) %>% 
+        rename(epidemic_1_positive = value) %>% 
+        select(date_formatted, proportion, total_flu, epidemic_1_positive)
       
       weekly_props <- weekly_true_proportions %>% 
         left_join(weekly_proportions, by = 'date_formatted') %>% drop_na()
@@ -304,12 +306,6 @@ run_mcmc_inference <- function(
         facet_grid(age_grp ~ imd_quintile, scales = 'free')
     }
     
-    # OLD (FOR BINOMIAL LLIKELIHOOD):
-    # Make log likelihood use max(infections, observations) to avoid -Inf where poss
-    # I.e. if(infections[i] < observations[i]){infections[i] <- observations[i]}
-    # time_series_maxed <- pmax(time_series_shifted$infections,
-    #                           time_series_shifted$observations)
-    
     # Vectorised log likelihood
     total_ll <- sum(dpois(
       x    = time_series_joint$observations,
@@ -320,9 +316,9 @@ run_mcmc_inference <- function(
     if(n_subtypes == 2){
       
       total_ll <- total_ll + sum(dbinom(
-        x    = round(weekly_props$modelled_infections*weekly_props$modelled_proportion),
-        size = round(weekly_props$modelled_infections),
-        p    = weekly_props$proportion,
+        x    = weekly_props$epidemic_1_positive,
+        size = weekly_props$total_flu,
+        p    = weekly_props$modelled_proportion,
         log  = TRUE
       ), na.rm = TRUE)
       
