@@ -8,115 +8,25 @@ map <- purrr::map
 options(readr.show_col_types = FALSE)
 options(dplyr.summarise.inform = FALSE)
 
-na_to_0 <- function(x){
-  x[is.na(x)] <- 0
-  x
-}
-
-susc_vector <- function(x,
-                        rep1 = 3,
-                        rep2 = 4,
-                        rep3 = 2){
-  
-  x <- unname(unlist(x))
-  
-  if(length(x) %notin% 2:3){stop('Length not 2 or 3')}
-  if(length(x) == 2){x <- c(x[1], 1, x[2])}
-
-  c(rep(x[1],rep1), rep(x[2],rep2), rep(x[3],rep3))
-  
-}
-
-imd_spline <- function(imd_pars){
-  
-  if(length(imd_pars) != 2){stop('Input length not 2')}
-  
-  # IMD 1 is exp(imd_pars[1]) times the reporting rate of IMD 3,
-  # IMD 5 is exp(imd_pars[1]) times the reporting rate of IMD 3
-  
-  x <- exp(imd_pars)
-  
-  c(x[1], 1 + (x[1] - 1)/2, 1, 1 + (x[2] - 1)/2, x[2])
-  
-}
-
-simp_labels <- function(string){
-  if(string == 'p_sec_input'){return('nssec')}
-  string <- gsub('_group','',string)
-  string <- gsub('_grp','',string)
-  string <- gsub('nssec','',string)
-  string <- gsub('p_sec_input_','nsseccode_',string)
-  string <- gsub('_p_sec_input','_nsseccode',string)
-  string <- gsub('c_','',string)
-  string <- gsub('p_','',string)
-  string <- gsub('_cd','',string)
-  string <- gsub('_nm','',string)
-  string <- gsub('_input','',string)
-  string <- gsub('_short','',string)
-  string <- gsub('_6','',string)
-  string <- gsub('_8','',string)
-  return(string)
-}
-
-variables_from_name <- function(varname){
-  
-  if(! varname %in% names(variables_and_names)){stop('varname not found')}
-  
-  out <- variables_and_names[[varname]]
-  
-  out
-}
-
-name_from_variables <- function(vars){
-  
-  i <- 0; j <- 0
-  
-  for(k in 1:length(variables_and_names)){
-    if(length(variables_and_names[[k]]) == length(vars)){
-      if(sum(variables_and_names[[k]] == vars) == length(vars)){
-        i <- k
-        j <- j + 1
-      }
-    }
-  }
-  
-  if(j > 1){stop('vars match more than one list entry')}
-  if(j == 0){stop("vars don't match any list entries")}
-  
-  out <- names(variables_and_names)[i]
-  
-  out
-}
-
-variables_and_names <- list(
-  'engreg' = c('eng_reg'),
-  'pcd' = c('pcd1'),
-  'pcdage' = c('pcd1','age_grp'),
-  'ageethn' = c('p_age_group','p_ethnicity'),
-  'pcdageethn' = c('pcd1','p_age_group','p_ethnicity'),
-  'utlaageethn' = c('utla','p_age_group','p_ethnicity'),
-  'pcdagehiqualnssec' = c('pcd1','age_grp_8','p_hiqual','p_sec_input'),
-  'pcdhousehold' = c('pcd1','hh_size_nm','hh_tenure_nm'),
-  'pcdhhsize' = c('pcd1','hh_size_nm'),
-  'pcdhhtenure' = c('pcd1','hh_tenure_nm'),
-  'pcdagehiqual' = c('pcd1','age_grp_8','p_hiqual'),
-  'pcdagenssec' = c('pcd1','age_grp_8','p_sec_input'),
-  'pcdethn' = c('pcd1','p_ethnicity'),
-  'pcdethntenure' = c('pcd1','p_ethnicity','p_tenure_short'),
-  'pcdethnhiqual' = c('pcd1','p_ethnicity','p_hiqual'),
-  'pcdtenurenssec' = c('pcd1','p_tenure_short','p_sec_input'),
-  'ethnnssec' = c('p_ethnicity','p_sec_input'),
-  'pcdethnnssec' = c('pcd1','p_ethnicity','p_sec_input'),
-  'utlaethnnssec' = c('utla','p_ethnicity','p_sec_input'),
-  'pcdageethnnssec' = c('pcd1','p_age_group','p_ethnicity','p_sec_input'),
-  'utlaageethnnssec' = c('utla','p_age_group','p_ethnicity','p_sec_input'),
-  'ageethnnssec' = c('p_age_group','p_ethnicity','p_sec_input')
-)
-
 ## COLORS FOR IMD ANALYSIS ##
 
 # var_cols <- c('#9B7EDE','#832161','#F7B801','#52050A','#BCD2EE','#F35B04')
 # names(var_cols) <- fitted_pars
+
+flu_strain_colors <- c('flu_a' = '#81559B', 'flu_b' = '#6699CC')#'#B2EF9B')
+flu_strain_names <- c('flu_a' = 'Flu A', 'flu_b' = 'Flu B')
+subtype_colors <- c('A' = '#81559B', 'AH1N1' = '#FF3C38', 'AH3N2' = '#FF8C42',
+                   'AUNSUB' = '#A23E48', 'B' = '#6699CC')
+subtype_names <- c('A' = 'Flu A', 'AH1N1' = 'Flu A (H1N1)', 'AH3N2' = 'Flu A (H3N2)', 'AUNSUB' = 'Flu A (unsubtyped)', 'B' = 'Flu B')
+
+flu_subtype_colors <- c('flu_a' = '#81559B', 'flu_a_h1n1pdm09' = '#FF3C38', 'flu_a_h3n2' = '#FF8C42',
+                        'flu_a_unsubtyped' = '#A23E48', 'flu_b' = '#6699CC')
+flu_subtype_names <- c('flu_a' = 'Flu A', 'flu_a_h1n1pdm09' = 'Flu A H1N1pmd09', 'flu_a_h3n2' = 'Flu A H3N2',
+                       'flu_a_unsubtyped' = 'Flu A Unsubtyped', 'flu_b' = 'Flu B')
+
+risk_colors <- c('low_risk' = '#D90368', 'high_risk' = '#F75C03')
+
+season_colors <- c('2023' = '#5D576B', '2024' = '#99E1D9', '2025' = '#F7567C')
 
 eng_reg_colors <- c("London"="#31688EFF", "North West" = '#CC4678FF',
                     'Yorkshire and The Humber' = '#65156EFF', "North East" = '#006837', 
@@ -187,25 +97,6 @@ colors_age_grp <- c('Aged 4 years and under' = '#4d004b', 'Aged 5 to 9 years' = 
                         'Aged 60 to 64 years' = '#990000', 'Aged 65 to 69 years' = '#08589e',
                         'Aged 70 to 74 years' = '#3690c0', 'Aged 75+' = '#a6bddb')
 
-model_colors <- c('utlaageethnnssec' = '#31a354', 'pcd' = '#7a0177', 
-                  'pcdage' = '#fe9929', 'pcdageethn' = '#bdc9e1', 
-                  'pcdagehiqualnssec' = '#a50f15', 'pcdhousehold' = '#bae4b3',
-                  'pcdagenssec' = '#006d2c', 'pcdagehiqual' = '#2b8cbe', 
-                  'pcdethn' = '#de2d26', 'pcdhhsize' = '#f768a1', 'pcdhhtenure' = '#d7b5d8',
-                  'pcdethntenure' = 'blue4', 'pcdethnhiqual' = '#fec44f',
-                  'pcdethnnssec' = '#ec7014', 'pcdageethnnssec' = '#8c96c6',
-                  'ageethnnssec' = '#fb9a99', 'engreg' = '#72874EFF') 
-
-model_names <- unlist(unname(lapply(sapply(lapply(names(model_colors), variables_from_name),
-                             paste, collapse = '_'),
-                             simp_labels)))
-for(k in 1:length(model_names)){model_names[k] <- gsub('nsseccode','nssec',model_names[k])}
-for(k in 1:length(model_names)){model_names[k] <- gsub('pcd1','pcd',model_names[k])}
-names(model_names) <- names(model_colors)
-
-method_shapes <- c('det' = 1, 'prob' = 19)  
-method_names <- c('Deterministic','Probabilistic')
-names(method_names) <- c('det','prob')
 
 variable_colors <- c('age_grp' = '#31a354', 'hh_size_nm' = '#7a0177', 
                   'hh_tenure_nm' = '#fd8d3c', 'p_ethnicity' = '#bdc9e1', 
