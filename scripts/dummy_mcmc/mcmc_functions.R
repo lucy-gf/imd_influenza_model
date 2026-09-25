@@ -38,6 +38,10 @@ run_mcmc_inference <- function(
   
   txt_out <- file.path('mcmc_output',paste0('index_',txt_output,'.txt'))
   
+  LLcache <- new.env(hash = TRUE, parent = emptyenv())
+  
+  make_key <- function(par) paste(sprintf("%.15g", par), collapse = "_")
+  
   # Define the log likelihood function
   single_ll <- function(pars) {
     
@@ -253,7 +257,17 @@ run_mcmc_inference <- function(
           1:length(epi_data_1[[1]]),
         modelled_infections = (epi_data_1[[1]] + epi_data_2[[1]]),
         modelled_proportion = epi_data_1[[1]]/(epi_data_1[[1]] + epi_data_2[[1]])
-      ) %>% drop_na()
+      ) %>% drop_na() %>% 
+        ## IF 0, CHANGE TO VERY LOW NUMBER TO AVOID -INF LOG-LIKELIHOOD
+        ## IF 1, CHANGE TO VERY HIGH NUMBER TO AVOID -INF LOG-LIKELIHOOD
+        mutate(
+          min_modelled_proportion = min(modelled_proportion[modelled_proportion != 0]),
+          max_modelled_proportion = max(modelled_proportion[modelled_proportion != 1]),
+          modelled_proportion = case_when(
+            modelled_proportion == 0 ~ min_modelled_proportion/10000,
+            modelled_proportion == 1 ~ 1 - (1 - max_modelled_proportion)/10000,
+            T ~ modelled_proportion
+        )) %>% select(!c(min_modelled_proportion, max_modelled_proportion))
       
       weekly_true_proportions <- subtype_season %>% filter(subtype == epidemic_1) %>% 
         rename(epidemic_1_positive = value) %>% 
@@ -307,7 +321,7 @@ run_mcmc_inference <- function(
     }
     
     # Vectorised log likelihood
-    total_ll <- sum(dpois(
+    ll_1 <- sum(dpois(
       x    = time_series_joint$observations,
       lambda = time_series_joint$expected_cases,
       log  = TRUE
@@ -315,14 +329,18 @@ run_mcmc_inference <- function(
     
     if(n_subtypes == 2){
       
-      total_ll <- total_ll + sum(dbinom(
+      ll_2 <- sum(dbinom(
         x    = weekly_props$epidemic_1_positive,
         size = weekly_props$total_flu,
         p    = weekly_props$modelled_proportion,
         log  = TRUE
       ), na.rm = TRUE)
       
-    }
+    }else{ ll_2 <- 0 }
+    
+    assign(make_key(pars), c(ll_1, ll_2), envir = LLcache)
+    
+    total_ll <- ll_1 + ll_2
     
     if(is.nan(total_ll) | is.infinite(total_ll)) return(-Inf)
     
@@ -476,6 +494,8 @@ run_mcmc_inference <- function(
   }
   # TODO Should these be lognormal instead?
   
+  # set up priors and lower/upper bounds
+  {
   # Primary care: centred at 0.02, secondary: centred at 0.005
   prim_beta  <- beta_pars(0.02, 200) 
   sec_beta   <- beta_pars(0.005, 200)
@@ -510,6 +530,7 @@ run_mcmc_inference <- function(
                   max_trans, rep(max_susc, 3), max_log_init_inf,
                   rep(max_reporting, 12),
                   rep(max_spline, 4))
+  }
   
   sampler <- function(n = 1){
     out <- matrix(NA, nrow = n, ncol = length(initial_parameters))
@@ -614,6 +635,26 @@ run_mcmc_inference <- function(
   ) 
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
+  
+  nPar <- out$setup$numPars
+  
+  lookupComponents <- function(chainMat, cache, nPar) {
+    parMat <- chainMat[, 1:nPar, drop = FALSE]
+    comp <- t(apply(parMat, 1, function(par) {
+      val <- mget(make_key(par), envir = cache, ifnotfound = list(c(NA_real_, NA_real_)))[[1]]
+      val
+    }))
+    colnames(comp) <- c("LL1", "LL2")
+    coda::mcmc(cbind(chainMat, comp))
+  }
+  
+  LLcomponents <- if (coda::is.mcmc.list(out$chain)) {
+    coda::as.mcmc.list(lapply(out$chain, lookupComponents, cache = LLcache, nPar = nPar))
+  } else {
+    lookupComponents(out$chain, LLcache, nPar)
+  }
+  
+  out$LLcomponents <- LLcomponents
   
   return(out)
 }

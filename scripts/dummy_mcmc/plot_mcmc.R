@@ -141,9 +141,9 @@ for(i in 1:nrow(subtype_seasons)){
                subtype = subtype_seasons$subtype[i],
                year = subtype_seasons$year[i],
                transmissibility = up_ss$transmissibility,
-               adult_susceptibility = up_ss$susceptibility,
-               rel_children_susceptibility = up_ss$rel_susc_children,
-               rel_older_adults_susceptibility = up_ss$rel_susc_older_adults,
+               children_susceptibility = up_ss$children_susceptibility,
+               adults_susceptibility = up_ss$adults_susceptibility,
+               older_adults_susceptibility = up_ss$older_adults_susceptibility,
                init_infected = log10(up_ss$init_infected),
                primary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$gp_rate,
                primary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$gp_rate,
@@ -161,9 +161,9 @@ for(i in 1:nrow(subtype_seasons)){
                imd_spline_primary_2 = up_imd_spline_ss$primary[2],
                imd_spline_secondary_1 = up_imd_spline_ss$secondary[1],
                imd_spline_secondary_2 = up_imd_spline_ss$secondary[2],
-               R0 = R0_func(susceptibility = fcn_assign_ages(up_ss$susceptibility*up_ss$rel_susc_children,
-                                                             up_ss$susceptibility,
-                                                             up_ss$susceptibility*up_ss$rel_susc_older_adults,
+               R0 = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
+                                                             up_ss$adults_susceptibility,
+                                                             up_ss$older_adults_susceptibility,
                                                              age_labels),
                             inf_period = known_pars$epid_periods[2],
                             beta_in = up_ss$transmissibility,
@@ -273,24 +273,24 @@ for(i in 1:nrow(unique_df)){
   row <- unique_df[i, ]
   
   mcmc_samples[transmissibility_epid_1 == row$transmissibility_epid_1 &
-                 adult_susceptibility_epid_1 == row$adult_susceptibility_epid_1 &
-                 rel_children_susceptibility_epid_1 == row$rel_children_susceptibility_epid_1 &
-                 rel_older_adults_susceptibility_epid_1 == row$rel_older_adults_susceptibility_epid_1,
-               R0_epid_1 := R0_func(susceptibility = fcn_assign_ages(row$adult_susceptibility_epid_1*row$rel_children_susceptibility_epid_1,
-                                                                     row$adult_susceptibility_epid_1,
-                                                                     row$adult_susceptibility_epid_1*row$rel_older_adults_susceptibility_epid_1,
+                 children_susceptibility_epid_1 == row$children_susceptibility_epid_1 & 
+                 adults_susceptibility_epid_1 == row$adults_susceptibility_epid_1 &
+                 older_adults_susceptibility_epid_1 == row$older_adults_susceptibility_epid_1,
+               R0_epid_1 := R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_1,
+                                                                     row$adults_susceptibility_epid_1,
+                                                                     row$older_adults_susceptibility_epid_1,
                                                                      age_labels),
                              inf_period = known_pars$epid_periods[2],
                              beta_in = row$transmissibility_epid_1,
                              cm_in = cm)
                ]
   mcmc_samples[transmissibility_epid_2 == row$transmissibility_epid_2 &
-                 adult_susceptibility_epid_2 == row$adult_susceptibility_epid_2 &
-                 rel_children_susceptibility_epid_2 == row$rel_children_susceptibility_epid_2 &
-                 rel_older_adults_susceptibility_epid_2 == row$rel_older_adults_susceptibility_epid_2,
-               R0_epid_2 := R0_func(susceptibility = fcn_assign_ages(row$adult_susceptibility_epid_2*row$rel_children_susceptibility_epid_2,
-                                                                     row$adult_susceptibility_epid_2,
-                                                                     row$adult_susceptibility_epid_2*row$rel_older_adults_susceptibility_epid_2,
+                 children_susceptibility_epid_2 == row$children_susceptibility_epid_2 & 
+                 adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
+                 older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
+               R0_epid_2 := R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
+                                                                     row$adults_susceptibility_epid_2,
+                                                                     row$older_adults_susceptibility_epid_2,
                                                                      age_labels),
                                     inf_period = known_pars$epid_periods[2],
                                     beta_in = row$transmissibility_epid_2,

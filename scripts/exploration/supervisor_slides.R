@@ -569,6 +569,21 @@ reff_plot + susc_plot + trans_plot + init_inf_plot + init_inf_plot_10 +
 ggsave(gsub("epids.png", "prior_pars.png", .args[2]), width = 12, height = 10, dpi = 600)
  
 
+### subtype -Inf binomial example
+
+if(F){
+  weekly_props %>% 
+    ggplot() +
+    geom_line(aes(date_formatted, modelled_proportion), lwd = 0.8) + 
+    geom_label(x=as.Date('25-12-2023', format = '%d-%m-%Y'),y=0.8, 
+               label = 'modelled proportion') +  
+    geom_label(x=as.Date('25-12-2023', format = '%d-%m-%Y'),y=0.55, 
+               label = 'ukhsa test\nproportion', col = 'red') + 
+    geom_line(aes(date_formatted, proportion), col = 'red', lwd = 0.8, alpha = 0.5) + 
+    geom_point(aes(date_formatted, proportion, size = total_flu), col = 'red') + 
+    theme_lg() + 
+    labs(x = '', y = 'proportion H1N1', size = 'total positive\nflu tests')
+}
 
 
 
