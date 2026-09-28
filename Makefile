@@ -79,7 +79,6 @@ dummy_inf: ${DUMMYDAT}/dummy_infections.rds
 all_dummy: ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/dummy_surveillance.rds
 
 
-##### MCMC FITTING ###################################################################
 
 
 
