@@ -58,9 +58,9 @@ analysis on the OpenSAFELY platform
     (where `i=1` refers to the 2023/24 season, ..., `i=3` refers to the 2025/26 season)
     and `chain=1,...,10`, running 10 independent chains for each season
        - Each season *jointly* fits to data from the one to two subtypes from that subtype-season
-    - All of these can be run on the HPC using the bash files:
-        - `bash/fit_mcmc_1.txt`, `bash/fit_mcmc_2.txt`, `bash/fit_mcmc_3.txt`
-        - The seasonal index is defined by the filename, and the chains are defined as an array
+
+> ``📝`` *The MCMC fitting can be run on the HPC using the bash files `bash/fit_mcmc_i.txt`, where the seasonal index is defined by the `i` in the filename, and the chains are defined as an array.*
+
 8. After running the MCMC fitting on the HPC, extract the outputs (held in `output/data`)
 9. Plotting the posterior parameters (traces etc.) 
     - `scripts/dummy_mcmc/plot_mcmc.R`
