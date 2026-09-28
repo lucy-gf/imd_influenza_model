@@ -18,7 +18,7 @@ run_mcmc_inference <- function(
     nburn, 
     thinning,
     n_chains,
-    n_pop = 100,
+    n_pop = 1,
     n_cores = 1,
     txt_output = NULL
 ) {
@@ -264,8 +264,8 @@ run_mcmc_inference <- function(
           min_modelled_proportion = min(modelled_proportion[modelled_proportion != 0]),
           max_modelled_proportion = max(modelled_proportion[modelled_proportion != 1]),
           modelled_proportion = case_when(
-            modelled_proportion == 0 ~ min_modelled_proportion/10000,
-            modelled_proportion == 1 ~ 1 - (1 - max_modelled_proportion)/10000,
+            modelled_proportion == 0 ~ min_modelled_proportion/1e10,
+            modelled_proportion == 1 ~ 1 - (1 - max_modelled_proportion)/1e10,
             T ~ modelled_proportion
         )) %>% select(!c(min_modelled_proportion, max_modelled_proportion))
       
@@ -350,22 +350,21 @@ run_mcmc_inference <- function(
   
   llikelihood <- function(pars) {
     
+    if (ll_call_count == 0) { ll_start_time <<- Sys.time() }
+    ll_call_count <<- ll_call_count + 1
+    mod_val <- if (ll_total_calls < 20) 1 else if (ll_total_calls < 1000) 10 else 50
+    if (ll_call_count %% mod_val == 0) {
+      elapsed   <- as.numeric(difftime(Sys.time(), ll_start_time, units = 'mins'))
+      rate      <- ll_call_count / elapsed
+      remaining <- (ll_total_calls - ll_call_count) / rate
+      writeLines(sprintf(
+        "INDEX %d: Generation %d / %d (%.1f%%) | Elapsed: %.1f min | Est. remaining: %.1f min\n",
+        txt_output, ll_call_count, ll_total_calls,
+        100 * ll_call_count / ll_total_calls, elapsed, remaining
+      ), txt_out)
+    }
+    
     if (is.matrix(pars)) {
-      
-      # progress tracking now happens ONCE PER GENERATION, in the parent process
-      if (ll_call_count == 0) { ll_start_time <<- Sys.time() }
-      ll_call_count <<- ll_call_count + 1
-      mod_val <- if (ll_total_calls < 20) 1 else if (ll_total_calls < 1000) 10 else 50
-      if (ll_call_count %% mod_val == 0) {
-        elapsed   <- as.numeric(difftime(Sys.time(), ll_start_time, units = 'mins'))
-        rate      <- ll_call_count / elapsed
-        remaining <- (ll_total_calls - ll_call_count) / rate
-        writeLines(sprintf(
-          "INDEX %d: Generation %d / %d (%.1f%%) | Elapsed: %.1f min | Est. remaining: %.1f min\n",
-          txt_output, ll_call_count, ll_total_calls,
-          100 * ll_call_count / ll_total_calls, elapsed, remaining
-        ), txt_out)
-      }
       
       res <- parallel::mclapply(
         seq_len(nrow(pars)),
@@ -496,9 +495,9 @@ run_mcmc_inference <- function(
   
   # set up priors and lower/upper bounds
   {
-  # Primary care: centred at 0.02, secondary: centred at 0.005
-  prim_beta  <- beta_pars(0.02, 200) 
-  sec_beta   <- beta_pars(0.005, 200)
+  # IGPR and IHR centred roughly around the crude estimates (based on attack rate etc.)
+  prim_beta  <- beta_pars(initial_parameters[6], 200) 
+  sec_beta   <- beta_pars(initial_parameters[12], 200)
   # Susceptibility beta distributed, mean at 0.5
   shape1_susc <- 2
   shape2_susc <- 2
@@ -673,7 +672,7 @@ plot_density <- function(var, filtered = T){
   var_label <- gsub('_rate_','_rate\n', var)
   var_label <- gsub('_spline_','_spline\n', var_label)
   
-  var_label <- if(var=='R0'){'R0 (calculated after)'}else{
+  var_label <- if(var=='Reff'){'Reff (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var_label}
   }
   
@@ -684,12 +683,13 @@ plot_density <- function(var, filtered = T){
   
   if(!grepl('imd_spline', var)){
     
+    var_column <- colnames(data)[substr(colnames(data), 1, nchar(colnames(data)) - 7) == var]
+    
     data %>%
-      select(!starts_with('imd_')) %>% 
+      select(iteration, epidemic, chain, !!!syms(var_column)) %>%
       pivot_longer(!c(iteration,epidemic,chain)) %>%
       mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
              name = substr(name, 1, nchar(name) - 7)) %>% 
-      filter(name == var) %>%
       left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
       filter(!is.na(season)) %>% # remove non-real epidemics
       mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
@@ -711,9 +711,8 @@ plot_density <- function(var, filtered = T){
     epid_pars_joining <- epid_pars_joining %>% 
       select(!c(subtype, epidemic_of_season)) %>% unique()
     
-    data %>%
+    data %>% select(iteration, epidemic, chain, !!!syms(var)) %>%
       pivot_longer(!c(iteration,epidemic,chain)) %>%
-      filter(name == var) %>%
       left_join(epid_pars_joining, by = c('epidemic','name')) %>% 
       filter(!is.na(season)) %>% # remove non-real epidemics
       mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
@@ -744,7 +743,7 @@ plot_trace <- function(var, filtered = F){
   var_label <- gsub('_rate_','_rate\n', var)
   var_label <- gsub('_spline_','_spline\n', var_label)
   
-  var_label <- if(var=='R0'){'R0 (calculated after)'}else{
+  var_label <- if(var=='Reff'){'Reff (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var_label}
   }
   
@@ -757,12 +756,13 @@ plot_trace <- function(var, filtered = F){
   
   if(!grepl('imd_spline|likelihood', var)){
     
+    var_column <- colnames(data)[substr(colnames(data), 1, nchar(colnames(data)) - 7) == var]
+      
     p <- data %>%
-      select(!starts_with('imd_')) %>% 
+      select(iteration, epidemic, chain, !!!syms(var_column)) %>% 
       pivot_longer(!c(iteration,epidemic,chain)) %>%
       mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
              name = substr(name, 1, nchar(name) - 7)) %>% 
-      filter(name == var) %>%
       left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
       filter(!is.na(season)) %>% # remove non-real epidemics
       mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
@@ -784,9 +784,8 @@ plot_trace <- function(var, filtered = F){
       epid_pars_joining <- epid_pars %>% 
         select(epidemic, season) %>% unique()
       
-      p <- data %>%
+      p <- data %>% select(iteration, epidemic, chain, !!!syms(var)) %>%
         pivot_longer(!c(iteration,epidemic,chain)) %>%
-        filter(name == var) %>%
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
@@ -802,9 +801,8 @@ plot_trace <- function(var, filtered = F){
       epid_pars_joining <- epid_pars_joining %>% 
         select(!c(subtype, epidemic_of_season)) %>% unique()
       
-      p <- data %>%
+      p <- data %>% select(iteration, epidemic, chain, !!!syms(var)) %>%
         pivot_longer(!c(iteration,epidemic,chain)) %>%
-        filter(name == var) %>%
         left_join(epid_pars_joining, by = c('epidemic','name')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(true_value_NA = case_when(is.na(true_value) ~ T, 

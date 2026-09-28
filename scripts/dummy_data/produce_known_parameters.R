@@ -116,16 +116,17 @@ risk_group_pop <- data.frame(risk_proportion = risk_group_imd_variation) %>%
   mutate(risk_population = round(risk_proportion*pop)) %>% 
   arrange(imd_quintile, age_grp)
 
+## PLOT
 risk_group_pop %>% 
   ggplot() + geom_line(aes(age_grp, risk_population, col=as.factor(imd_quintile),
                            group=imd_quintile), lwd = 0.8) + 
-  scale_color_manual(values = imd_quintile_colors) + theme_bw() + 
-  labs(x = '', y = 'Proportion in risk group', col = 'IMD')
+  scale_color_manual(values = imd_quintile_colors) + theme_lg() + 
+  labs(x = '', y = 'Population in risk group', col = 'IMD')
 
 risk_group_pop %>% 
   ggplot() + geom_line(aes(age_grp, risk_proportion, col=as.factor(imd_quintile),
                            group=imd_quintile), lwd = 0.8) + 
-  scale_color_manual(values = imd_quintile_colors) + theme_bw() + 
+  scale_color_manual(values = imd_quintile_colors) + theme_lg() + 
   labs(x = '', y = 'Proportion in risk group', col = 'IMD')
 
 #### VACCINATION COVERAGE #### 
@@ -171,11 +172,12 @@ vaccinated_pop <- rbind(vaccinated_pop_1 %>% mutate(risk_level = 'low', pop = po
 vaccinated_pop %>% group_by(age_grp,imd_quintile) %>% 
   summarise(vaccinated_population=sum(vaccinated_population)) %>% 
   ggplot() + geom_line(aes(age_grp, vaccinated_population, col=imd_quintile,
-                           group=imd_quintile))
+                           group=imd_quintile)) + theme_lg()
 
 vaccinated_pop %>% 
   ggplot() + geom_line(aes(age_grp, vaccinated_population, col=imd_quintile,
-                           lty = risk_level, group=interaction(imd_quintile,risk_level)))
+                           lty = risk_level, group=interaction(imd_quintile,risk_level))) +
+  theme_lg()
 
 vacc_plot <- vaccinated_pop %>% 
   ggplot() +
@@ -189,7 +191,7 @@ vacc_plot <- vaccinated_pop %>%
                  shape = risk_level), stroke=1.5, size = 3) +
   scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
   scale_shape_manual(values = c(1, 2)) +
-  theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
+  theme_lg() + labs(x = 'Age group', col = 'IMD quintile', 
                     y = 'Simulated vaccination coverage',
                     shape = 'Risk level') +
   theme(text = element_text(size = 14)); vacc_plot
@@ -223,7 +225,7 @@ risk_plot <- vaccinated_pop %>%
                 col = as.factor(imd_quintile), y = risk_proportion), 
              shape = 1, stroke=2, size = 3) +
   scale_color_manual(values = imd_quintile_colors) + ylim(c(0,NA)) +
-  theme_bw() + labs(x = 'Age group', col = 'IMD quintile', 
+  theme_lg() + labs(x = 'Age group', col = 'IMD quintile', 
                     y = 'Simulated percentage in clinical risk group') +
   theme(text = element_text(size = 14),
         legend.position = 'none')
@@ -343,6 +345,7 @@ VE_65_AH1N1_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', fl
 VE_65_AH3N2_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'H3N2'))$VE
 VE_65_B_2025_2026 <- (ukhsa_dat_2025_26 %>% filter(age_group %like% '65', flu_subtype %like% 'InfluenzaB'))$VE
 
+## merge data
 vaccination_efficacy_hospitalisation <- CJ(subtype = subtype_vec,
                                            start_of_season = years,
                                            age_grp = age_labels,
@@ -361,6 +364,7 @@ for(subtype_i in subtype_vec){
   }
 }
 
+## plot
 vaccination_efficacy_hospitalisation %>% 
   ggplot() + 
   geom_line(aes(x = age_grp, y = VE_HOSP, group = interaction(start_of_season, subtype),
@@ -372,7 +376,7 @@ vaccination_efficacy_hospitalisation %>%
              stroke=1.5, size = 3) +
   scale_shape_manual(values = c(1, 2, 4)) +
   scale_color_manual(values = season_colors) +
-  theme_bw() + labs(x = 'Age group', col = 'Season start',
+  theme_lg() + labs(x = 'Age group', col = 'Season start',
                     y = 'VE against hospitalisation') +
   facet_grid(subtype ~.) + 
   theme(text = element_text(size = 14))
@@ -389,7 +393,7 @@ vaccination_efficacy_hospitalisation %>%
   ylim(c(NA, 1)) + 
   scale_shape_manual(values = c(1, 2, 4)) +
   scale_color_manual(values = subtype_colors) +
-  theme_bw() + labs(x = 'Age group', col = 'Subtype', shape = 'Season',
+  theme_lg() + labs(x = 'Age group', col = 'Subtype', shape = 'Season',
                     y = 'VE against hospitalisation') +
   facet_grid(start_of_season ~.) +
   theme(text = element_text(size = 14))

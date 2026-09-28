@@ -156,9 +156,9 @@ for(i in 1:nrow(subtype_seasons)){
                                 subtype = subtype_seasons$subtype[i],
                                 year = subtype_seasons$year[i],
                                 transmissibility = up_ss$transmissibility,
-                                adult_susceptibility = up_ss$susceptibility,
-                                rel_children_susceptibility = up_ss$rel_susc_children,
-                                rel_older_adults_susceptibility = up_ss$rel_susc_older_adults,
+                                children_susceptibility = up_ss$children_susceptibility,
+                                adults_susceptibility = up_ss$adults_susceptibility,
+                                older_adults_susceptibility = up_ss$older_adults_susceptibility,
                                 init_infected = log10(up_ss$init_infected),
                                 primary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$gp_rate,
                                 primary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$gp_rate,
@@ -176,13 +176,13 @@ for(i in 1:nrow(subtype_seasons)){
                                 imd_spline_primary_2 = up_imd_spline_ss$primary[2],
                                 imd_spline_secondary_1 = up_imd_spline_ss$secondary[1],
                                 imd_spline_secondary_2 = up_imd_spline_ss$secondary[2],
-                                R0 = R0_func(susceptibility = fcn_assign_ages(up_ss$susceptibility*up_ss$rel_susc_children,
-                                                                              up_ss$susceptibility,
-                                                                              up_ss$susceptibility*up_ss$rel_susc_older_adults,
-                                                                              age_labels),
-                                             inf_period = known_pars$epid_periods[2],
-                                             beta_in = up_ss$transmissibility,
-                                             cm_in = cm)
+                                Reff = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
+                                                                                up_ss$adults_susceptibility,
+                                                                                up_ss$older_adults_susceptibility,
+                                                                                age_labels),
+                                               inf_period = known_pars$epid_periods[2],
+                                               beta_in = up_ss$transmissibility,
+                                               cm_in = cm)
                      ))
 }
 
@@ -203,6 +203,7 @@ epid_pars <- epid_pars %>%
       T ~ epidemic_of_season)
     ) %>% unique()
 
+# data frame helpful for merging parameters later
 par_name_df <- epid_pars %>% 
   select(epidemic, season, subtype, year, name, par_name, joining_name) %>% unique() %>% 
   rename(variable = joining_name)
@@ -229,12 +230,14 @@ admin_cols <- c('likelihood','chain_it_id','epidemic')
 # (i.e. don't care about epidemic 2 in 2025)
 
 post_long <- melt.data.table(mcmc_samples_f_f, 
-                             id.vars = admin_cols)[par_name_df, on = c('epidemic','variable')]
+                             id.vars = admin_cols)[par_name_df[par_name_df$epidemic %in% unique(mcmc_samples_f_f$epidemic),], 
+                                                   on = c('epidemic','variable')]
 
 # make wide again
 post_wide <- dcast.data.table(post_long,
                               likelihood + chain_it_id + epidemic + season + year + subtype ~ name, value.var = 'value')
 
+# scale down by 2/3 as a third of the rows describe IMD splines (not individual epidemics)
 cat('\nRunning fitted epidemics (', nrow(post_wide)*2/3, ' total): ', sep = '')
 
 fitted_epidemics <- data.table()
@@ -284,9 +287,9 @@ for(season_i in unique(post_long$season)){
       if(!all.equal(sum(init_infected_vec), init_infected_num)){warning('init infected not adding up')}
       
       susceptibility_vec <- fcn_assign_ages(
-        data$adult_susceptibility*data$rel_children_susceptibility,
-        data$adult_susceptibility,
-        data$adult_susceptibility*data$rel_older_adults_susceptibility,
+        data$children_susceptibility,
+        data$adults_susceptibility,
+        data$older_adults_susceptibility,
         age_labels
       )
       
@@ -324,6 +327,8 @@ for(season_i in unique(post_long$season)){
 }
 
 #### IHRs AND IGPRs ####
+
+## need to turn spline posteriors into actual rates
 
 ## column names
 primary_names <- paste0('primary_imd_', 1:5)
@@ -399,6 +404,12 @@ hc_rates_fitted$broad_age <- factor(
 
 plot_healthcare_rates <- function(i){
   
+  if(nrow(hc_rates_fitted %>% 
+          filter(subtype == subtype_seasons$subtype[i],
+                 season == subtype_seasons$season[i])) == 0){
+    return()
+  }
+  
   hc_rates_fitted %>% 
     filter(subtype == subtype_seasons$subtype[i],
            season == subtype_seasons$season[i]) %>% 
@@ -423,7 +434,14 @@ plot_healthcare_rates <- function(i){
   
 }
 
-hc_plots <- map(.x = 1:nrow(subtype_seasons),
+# filter to only the subtype-seasons which ran
+subtype_seasons_to_plot_vec <- unique((hc_rates_fitted %>% mutate(ss = paste0(season,'_',subtype)))$ss)
+subtype_seasons_to_plot <- subtype_seasons %>% ungroup() %>% 
+  mutate(ss = paste0(season,'_',subtype)) %>% 
+  mutate(rowid = 1:nrow(subtype_seasons),
+         plot = ss %in% subtype_seasons_to_plot_vec)
+
+hc_plots <- map(.x = subtype_seasons_to_plot$rowid[subtype_seasons_to_plot$plot],
                 .f = plot_healthcare_rates)
 
 patchwork::wrap_plots(hc_plots) + plot_layout(guides = 'collect')

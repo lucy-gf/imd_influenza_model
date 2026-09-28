@@ -54,7 +54,6 @@ broad_ages_care_rates <- data.table(
   )
 )
 
-
 ## number of years of data
 years <- 2023:2025 # 2023-24 to 2025-26
 subtype_years <- read_rds(.args[2])
@@ -66,15 +65,17 @@ subtype_vec <- unique(subtype_years$subtype)
 #### EPIDEMIOLOGICAL PARAMETERS ####
 
 ## susceptibility, transmissibility
+## (randomly sampled around a mean)
 
 susc_sd <- 0.02
+trans_sd <- 0.001
 
 epid_pars <- subtype_years %>% 
   select(year, subtype) %>% unique() %>% 
   mutate(children_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.55, sd = susc_sd),
          adults_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.45, sd = susc_sd),
          older_adults_susceptibility = rnorm(n = nrow(subtype_years), mean = 0.4, sd = susc_sd),
-         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.18, sd = 0.001)) %>% 
+         transmissibility = rnorm(n = nrow(subtype_years), mean = 0.18, sd = trans_sd)) %>% 
   # manual adjustments
   mutate(children_susceptibility = case_when(subtype == 'B' ~ 0.8*children_susceptibility, 
                                              year == 2025 ~ 1.2*children_susceptibility, 
@@ -137,7 +138,6 @@ for(i in 1:nrow(subtype_years)){
                                                  subtype_years$subtype[i])))
   )
 }
-
 
 care_rate_age_df <- data.table(cross_join(
   care_rate_subtype_seasons,

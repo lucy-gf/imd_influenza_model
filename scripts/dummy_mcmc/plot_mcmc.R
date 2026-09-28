@@ -161,7 +161,7 @@ for(i in 1:nrow(subtype_seasons)){
                imd_spline_primary_2 = up_imd_spline_ss$primary[2],
                imd_spline_secondary_1 = up_imd_spline_ss$secondary[1],
                imd_spline_secondary_2 = up_imd_spline_ss$secondary[2],
-               R0 = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
+               Reff = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
                                                              up_ss$adults_susceptibility,
                                                              up_ss$older_adults_susceptibility,
                                                              age_labels),
@@ -205,12 +205,24 @@ read_and_get_samples <- function(i){
     number_date_str <- paste0(substr(number_date_str, 1, n_char - 1),
                               as.numeric(substr(number_date_str, n_char, n_char)) - 1)
   }
+  # or even the day before that
+  CHANGE_DATE <- !file.exists(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
+  if(CHANGE_DATE){
+    n_char <- nchar(number_date_str)
+    number_date_str <- paste0(substr(number_date_str, 1, n_char - 1),
+                              as.numeric(substr(number_date_str, n_char, n_char)) - 1)
+  }
+  
+  if(!file.exists(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))){
+    return(NULL)
+  }
   
   dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
   list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
   samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
-  samples_out
+  
+  return(samples_out)
 }
 
 # load most recently run settings (burn in, thinning, samples)
@@ -226,7 +238,7 @@ WAS_HPC <- output_details_file$HPC
 
 if(WAS_HPC){
   
-  dat_example <- readRDS(gsub('.rds',paste0('_1_', number_date_str,'.rds'),.args[8]))
+  # dat_example <- readRDS(gsub('.rds',paste0('_1_', number_date_str,'.rds'),.args[8]))
   mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
   mcmc_samples[, c('LP','LPr') := NULL]
   
@@ -239,7 +251,7 @@ if(WAS_HPC){
 }
 
 total_fitted_pars <- unique(epid_pars$par_name)
-total_fitted_pars <- total_fitted_pars[substr(total_fitted_pars, 1, 2) != 'R0']
+total_fitted_pars <- total_fitted_pars[substr(total_fitted_pars, 1, 2) != 'Reff']
 n_subtype_seasons <- nrow(epid_pars %>% select(subtype, season) %>% unique())
 n_seasons <- n_distinct(epid_pars$season)
 message('\n', length(total_fitted_pars),' fitted parameters, ', 
@@ -252,18 +264,19 @@ total_actual_fitted_pars <- (ncol(mcmc_samples) - 4)*epids_actual
 message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '')
 
 fitted_pars <- unique(epid_pars$name)
-fitted_pars <- fitted_pars[substr(fitted_pars, 1, 2) != 'R0']
+fitted_pars <- fitted_pars[substr(fitted_pars, 1, 4) != 'Reff']
 fitted_pars_not_imd <- fitted_pars[!grepl('imd_spline', fitted_pars)]
 fitted_pars_imd <- fitted_pars[grepl('imd_spline', fitted_pars)]
 posterior_cols <- c(paste0(fitted_pars_not_imd, '_epid_1'),
                     paste0(fitted_pars_not_imd, '_epid_2'), 
                     fitted_pars_imd)
+
 admin_cols <- c('likelihood', 'chain', 'iteration', 'epidemic')
 colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
 
-#### ADD R0 #### 
-cat('Adding R0: ')
+#### ADD Reff #### 
+message('Adding Reff')
 unique_df <- unique(mcmc_samples[, ..posterior_cols])
 
 pb <- txtProgressBar(min = 1, max = nrow(unique_df), style = 3)
@@ -272,30 +285,33 @@ for(i in 1:nrow(unique_df)){
   
   row <- unique_df[i, ]
   
+  R1 <- R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_1,
+                                                 row$adults_susceptibility_epid_1,
+                                                 row$older_adults_susceptibility_epid_1,
+                                                 age_labels),
+                inf_period = known_pars$epid_periods[2],
+                beta_in = row$transmissibility_epid_1,
+                cm_in = cm)
+  
+  R2 <- R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
+                                                 row$adults_susceptibility_epid_2,
+                                                 row$older_adults_susceptibility_epid_2,
+                                                 age_labels),
+                inf_period = known_pars$epid_periods[2],
+                beta_in = row$transmissibility_epid_2,
+                cm_in = cm)
+  
   mcmc_samples[transmissibility_epid_1 == row$transmissibility_epid_1 &
                  children_susceptibility_epid_1 == row$children_susceptibility_epid_1 & 
                  adults_susceptibility_epid_1 == row$adults_susceptibility_epid_1 &
                  older_adults_susceptibility_epid_1 == row$older_adults_susceptibility_epid_1,
-               R0_epid_1 := R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_1,
-                                                                     row$adults_susceptibility_epid_1,
-                                                                     row$older_adults_susceptibility_epid_1,
-                                                                     age_labels),
-                             inf_period = known_pars$epid_periods[2],
-                             beta_in = row$transmissibility_epid_1,
-                             cm_in = cm)
-               ]
+               Reff_epid_1 := R1]
+  
   mcmc_samples[transmissibility_epid_2 == row$transmissibility_epid_2 &
                  children_susceptibility_epid_2 == row$children_susceptibility_epid_2 & 
                  adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
                  older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
-               R0_epid_2 := R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
-                                                                     row$adults_susceptibility_epid_2,
-                                                                     row$older_adults_susceptibility_epid_2,
-                                                                     age_labels),
-                                    inf_period = known_pars$epid_periods[2],
-                                    beta_in = row$transmissibility_epid_2,
-                                    cm_in = cm)
-  ]
+               Reff_epid_2 := R2]
   
   # Print progress
   setTxtProgressBar(pb, i)
@@ -303,7 +319,7 @@ for(i in 1:nrow(unique_df)){
 }
 close(pb)
 
-posterior_cols <- c(posterior_cols, 'R0_epid_1', 'R0_epid_2')
+posterior_cols <- c(posterior_cols, 'Reff_epid_1', 'Reff_epid_2')
 plotting_cols <- unique(gsub('_epid_1|_epid_2', '', posterior_cols))
 
 #### FILTER #### 
@@ -315,24 +331,31 @@ mcmc_samples_filtered <- mcmc_samples[iteration > burn_in & iteration %% thinnin
 mcmc_samples_filtered[, iteration := 1:n_samples, .(chain, epidemic)]
 
 #### PLOT DENSITY #### 
+message('Plotting densities')
 densities <- map(.x = plotting_cols, .f = plot_density)
 patchwork::wrap_plots(densities, nrow = 6)
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_densities'),.args[length(.args)]), width = 30, height = 14)
 
 #### PLOT TRACE #### 
+message('Plotting traces')
 traces <- map(.x = plotting_cols, .f = plot_trace)
 patchwork::wrap_plots(traces, nrow = 6) 
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_traces'),.args[length(.args)]), width = 30, height = 14)
+
+message('Plotting filtered traces')
 traces_filtered <- map(.x = plotting_cols, .f = ~{plot_trace(var=.x, filtered=T)})
 patchwork::wrap_plots(traces_filtered, nrow = 6) 
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), width = 30, height = 14)
+
 plot_trace(var="transmissibility", filtered=T)
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_filtered_trace'),.args[length(.args)]), width = 10, height = 5)
+
+message('Plotting log-likelihood')
 log_likelihood_plot <- plot_trace('likelihood'); log_likelihood_plot
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 6)
 
 ## PAIRWISE PLOTS
-
+message('Plotting pairwise correlations')
 mcmc_samples_filtered[, chain_it_id := paste0(chain, '_', iteration)]
 
 pairs_cols <- c(posterior_cols, 'epidemic', 'chain_it_id')

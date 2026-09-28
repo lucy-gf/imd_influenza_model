@@ -17,14 +17,18 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "dummy_data", "known_parameters.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
 
-i <- as.numeric(commandArgs(trailingOnly = TRUE))
+bash_args <- as.numeric(commandArgs(trailingOnly = TRUE))
+
+i <- bash_args[1]
+chain <- bash_args[2]
+set.seed(chain)
+
+message(paste0('Index: ', i, ', Chain: ', chain))
 
 source(file.path('scripts','setup','colors.R'))
 source(file.path('scripts','setup','base_functions.R'))
 source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
-
-set.seed(60)
 
 #### LOAD DATA ####
 
@@ -33,6 +37,11 @@ imd_age_pop_reg <- readRDS(.args[1])
 age_labels <- unique(imd_age_pop_reg$age_grp)
 nage <- n_distinct(imd_age_pop_reg$age_grp)
 nimd <- n_distinct(imd_age_pop_reg$imd_quintile)
+
+broad_ages <- data.table(
+  age_grp = age_labels, 
+  broad_age = fcn_assign_ages('children','adults','older_adults',age_labels)
+)
 
 ## aggregate
 imd_age_pop <- imd_age_pop_reg %>% 
@@ -123,24 +132,35 @@ demography <- vaccinated_data_seasonal_no_rep %>%
 tot_pop <- sum(imd_age_pop$pop)
 if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')}
 
+# crude estimate of IGPR and IHR
+est_attack_rate <- 0.15
+est_health_ratios <- surveillance_data %>% filter(index == i) %>%
+  left_join(known_pars$proportion_observed,
+            by = c('age_grp','imd_quintile','risk_level')) %>% 
+  ungroup() %>% 
+  summarise(primary = sum(primary_care/OS_COVERAGE),
+            secondary = sum(secondary_care/OS_COVERAGE)) %>% 
+  mutate(pop = sum(demography$population)) %>% 
+  summarise(prim = sum(primary/(pop*est_attack_rate)),
+            sec = sum(secondary/(pop*est_attack_rate)))
+
 subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5, 
-                       rep(0.02, 6), rep(0.002, 6))
+                       rep(est_health_ratios$prim[1], 6), rep(est_health_ratios$sec[1], 6))
 # c(transmissibility, 3x absolute susceptibility, log of initial infected, 
 #   reporting rates for primary care, reporting rates for secondary care)
 
 #### RUNNING MCMC ####
 
 ## MCMC pars
-nchains <- 3
-n_pop <- 10
+n_pop <- 1
 burn_in <- 0
 thinning_value <- 5
-n_samples <- 30000
+n_samples <- 3000
 
-n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
-if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
-
-cat('\nn_cores: ', n_cores, '\n')
+# n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
+# if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
+# 
+# cat('\nn_cores: ', n_cores, '\n')
 
 mcmc_results <- run_mcmc_inference(
   demography_input = demography,
@@ -158,8 +178,7 @@ mcmc_results <- run_mcmc_inference(
   thinning = thinning_value,
   n_chains = 1,
   n_pop = n_pop,
-  n_cores = n_cores,
-  txt_output = i
+  txt_output = paste0(i, '_', chain)
 )
 
 #### SAVE ####
