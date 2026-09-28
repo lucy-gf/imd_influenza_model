@@ -52,7 +52,7 @@ rsconnect/
 /output
 Rplots.pdf
 /mcmc_output
-/bash
+#/bash
 /data/population
 /data/contact_matrix
 /data/dummy_data
