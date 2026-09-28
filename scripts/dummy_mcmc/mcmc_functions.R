@@ -358,7 +358,7 @@ run_mcmc_inference <- function(
       rate      <- ll_call_count / elapsed
       remaining <- (ll_total_calls - ll_call_count) / rate
       writeLines(sprintf(
-        "INDEX %d: Generation %d / %d (%.1f%%) | Elapsed: %.1f min | Est. remaining: %.1f min\n",
+        "INDEX %s: Generation %d / %d (%.1f%%) | Elapsed: %.1f min | Est. remaining: %.1f min\n",
         txt_output, ll_call_count, ll_total_calls,
         100 * ll_call_count / ll_total_calls, elapsed, remaining
       ), txt_out)
