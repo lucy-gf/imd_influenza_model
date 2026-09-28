@@ -6,7 +6,7 @@ risk groups, and vaccination status.
 
 ---
 
-This project currently uses simulated infection and healthcare data,and tests the 
+This project currently uses simulated infection and healthcare data, and tests the 
 capacity of the MCMC fitting process to recover the simulation parameters. This 
 analysis will then be applied to real-world healthcare data, using the OpenSAFELY 
 electronic health records platform.
