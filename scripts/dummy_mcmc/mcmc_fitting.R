@@ -100,14 +100,10 @@ names(delays) <- c('primary','secondary')
 #### RUNNING MCMC ####
 
 ## MCMC pars
-nchains <- 3
-n_pop = 100
-burn_in <- 200
+n_pop <- 1
+burn_in <- 0
 thinning_value <- 1
-n_samples <- 2000
-
-n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
-if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
+n_samples <- 20
 
 mcmc_parallel <- function(i){
   
@@ -156,13 +152,12 @@ mcmc_parallel <- function(i){
                            subtype_init_pars,
                            rep(0, 4)),
     #   subtype-specific parameters x2, IMD spline parameters x4
-    n_samples = n_samples*nchains, 
-    nburn = burn_in*nchains, 
+    n_samples = n_samples*n_pop,
+    nburn = burn_in*n_pop,
     thinning = thinning_value,
+    n_chains = 1,
     n_pop = n_pop,
-    n_cores = n_cores,
-    n_chains = 1 # the DEzs sampler produces three subchains, dealt with by
-    # multiplying nburn and n_samples by 3
+    txt_output = paste0(i)
   )
 }
 
