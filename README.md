@@ -13,10 +13,9 @@ electronic health records platform.
 
 ---
 
-## Overview
+# Overview
 
 The workflow consists of:
-
 1. Producing population data and contact matrices from raw inputs
     - `scripts/setup/load_pop_data.R` and `scripts/setup/load_contact_data.R`
 2. Producing "subtype-seasons" data for 2023/24, 2024/25, and 2025/25, using 
@@ -49,6 +48,7 @@ analysis on the OpenSAFELY platform
 
 > ``📝`` *All of the above can be run using the Makefile, i.e. using the `make` command in the terminal.*
 
+# 
 7. Running the MCMC fitting
     - `scripts/dummy_mcmc/mcmc_fitting_HPC.R` or `scripts/dummy_mcmc/mcmc_fitting.R`
         - The output files save differently depending on whether the fitting is 
@@ -59,7 +59,31 @@ analysis on the OpenSAFELY platform
     and `chain=1,...,10`, running 10 independent chains for each season
        - Each season *jointly* fits to data from the one to two subtypes from that subtype-season
 
+For example, in a season with two influenza subtypes including AH1N1, the log-likelihood is calculated as:
+
+$$
+\begin{aligned}
+    \ell &= \ell_{\text{H1N1}} + \ell_{\text{GP}} + \ell_{\text{H}} \\
+    \ell_{\text{H1N1}} &= \sum_{w = 1}^{52} \log(\text{Bin}(t^\text{H1N1}_{w}; t_w, p^\text{H1N1}_w))  \\
+    \ell_\text{GP} &= \sum_{w = 1}^{52} \sum_{i = 1}^{5} \sum_{a = 1}^{16} \sum_{r = 1}^{2} \log(\text{Pois}(\text{GP}^O_{w,i,a,r}; \text{GP}^{m}_{w,i,a,r})) \\
+    \ell_\text{H} &= \sum_{w = 1}^{52} \sum_{i = 1}^{5} \sum_{a = 1}^{16} \sum_{r = 1}^{2} \log(\text{Pois}(\text{H}^O_{w,i,a,r}; \text{H}^{m}_{w,i,a,r})) 
+\end{aligned} 
+$$
+
+$$
+\begin{aligned}
+    w &= \text{week} \\ 
+    i &= \text{IMD quintile} \\ 
+    a &= \text{age group} \\ 
+    r &= \text{risk group} 
+\end{aligned} 
+$$
+
+where $t_w$ is the weekly positive flu tests (filtered to relevant subtypes), $t_w^\text{H1N1}$ the weekly H1N1-positive flu tests, $p_w^\text{H1N1}$ the weekly modelled proportion of infections H1N1, $\text{GP}^O$ the observed GP visits, $\text{GP}^{m}$ the modelled GP visits, $H$ hospital visits analogously.
+
 > ``📝`` *The MCMC fitting can be run on the HPC using the bash files `bash/fit_mcmc_i.txt`, where the seasonal index is defined by the `i` in the filename, and the chains are defined as an array.*
+
+#
 
 8. After running the MCMC fitting on the HPC, extract the outputs (held in `output/data`)
 9. Plotting the posterior parameters (traces etc.) 
@@ -67,7 +91,7 @@ analysis on the OpenSAFELY platform
 10. Plotting the posterior epidemics and surveillance data
     - `scripts/dummy_mcmc/plot_mcmc_epids.R`
 
-## Repository Structure
+# Repository Structure
 
 ```
 imd_influenza_model/
@@ -85,7 +109,7 @@ imd_influenza_model/
 
 Output is written to `output/`, with subdirectories for figures (`output/figures/`) and data (`output/data/`).
 
-## Elements to be added
+# Elements to be added
 
 This is work in progress! Examples of elements which are not yet in the model:
 
