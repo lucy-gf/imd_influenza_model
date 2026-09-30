@@ -192,41 +192,66 @@ get_samples <- function(i){
 }
 
 read_and_get_samples <- function(i){
+  
   get_samples_parallel <- function(k){
     samp <- data.table(dat$chain[[k]])
-    samp[, chain := k][, iteration := 1:nrow(samp)]
+    llcomps <- dat$LLcomponents[[k]][, c('LL1','LL2')]
+    samp <- cbind(samp, llcomps)
+    samp[, job := chain_job]
+    samp[, chain := k + length(dat$chain)*(chain_job - 1)]
+    samp[, iteration := 1:nrow(samp)]
     samp
   }
   
-  # if file name doesn't exist, may have finished a day earlier
-  CHANGE_DATE <- !file.exists(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
-  if(CHANGE_DATE){
-    n_char <- nchar(number_date_str)
-    number_date_str <- paste0(substr(number_date_str, 1, n_char - 1),
-                              as.numeric(substr(number_date_str, n_char, n_char)) - 1)
-  }
-  # or even the day before that
-  CHANGE_DATE <- !file.exists(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
-  if(CHANGE_DATE){
-    n_char <- nchar(number_date_str)
-    number_date_str <- paste0(substr(number_date_str, 1, n_char - 1),
-                              as.numeric(substr(number_date_str, n_char, n_char)) - 1)
+  # Code could have finished running the day before
+  dates <- as.character(c(run_date, run_date - 1))
+  
+  # files in directory
+  all_files <- list.files(path = gsub('/mcmc_samples.rds','',.args[8]))
+  
+  # files finishing on relevant dates
+  date_files <- c()
+  for(date in dates){date_files <- c(date_files, all_files[grepl(date, all_files)])}
+  
+  # files with correct burn-in, thinning etc.
+  date_files <- date_files[grepl(number_str, date_files)]
+  
+  # files with correct index
+  date_files <- date_files[grepl(paste0('INDEX',i), date_files)]
+  
+  # how many chain jobs for a given index
+  chain_jobs <- suppressWarnings(unique(c(as.numeric(substr(date_files, 26, 26)),
+                                          as.numeric(substr(date_files, 26, 27)))))
+  chain_jobs <- chain_jobs[!is.na(chain_jobs)]
+  total_chains <- max(chain_jobs)
+  
+  samples_out <- data.table()
+  
+  for(chain_job in chain_jobs){
+    
+    CHANGE_DATE <- !file.exists(gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain_job, '_', number_date_str,'.rds'),.args[8]))
+    if(CHANGE_DATE){
+      n_char <- nchar(number_date_str)
+      number_date_str_CJ <- paste0(substr(number_date_str, 1, n_char - 1),
+                                as.numeric(substr(number_date_str, n_char, n_char)) - 1)
+    }else{number_date_str_CJ <- number_date_str}
+    
+    dat <- readRDS(gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain_job, '_', number_date_str_CJ,'.rds'),.args[8]))
+    list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
+    samples_out_CJ <- rbindlist(list_samples)
+    
+    samples_out <- rbind(samples_out, 
+                         samples_out_CJ)
+    
   }
   
-  if(!file.exists(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))){
-    return(NULL)
-  }
-  
-  dat <- readRDS(gsub('.rds',paste0('_', i, '_', number_date_str,'.rds'),.args[8]))
-  list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
-  samples_out <- rbindlist(list_samples)
   samples_out[, epidemic := i]
   
   return(samples_out)
 }
 
 # load most recently run settings (burn in, thinning, samples)
-output_details_file <- readRDS(.args[8])
+output_details_file <- data.table(x = number_str, date = run_date, HPC=T) #readRDS(.args[8])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 message('\n------------\nDate run: ',as.character(run_date),'\n------------',sep='')
@@ -238,7 +263,6 @@ WAS_HPC <- output_details_file$HPC
 
 if(WAS_HPC){
   
-  # dat_example <- readRDS(gsub('.rds',paste0('_1_', number_date_str,'.rds'),.args[8]))
   mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
   mcmc_samples[, c('LP','LPr') := NULL]
   
@@ -251,7 +275,7 @@ if(WAS_HPC){
 }
 
 total_fitted_pars <- unique(epid_pars$par_name)
-total_fitted_pars <- total_fitted_pars[substr(total_fitted_pars, 1, 2) != 'Reff']
+total_fitted_pars <- total_fitted_pars[substr(total_fitted_pars, 1, 4) != 'Reff']
 n_subtype_seasons <- nrow(epid_pars %>% select(subtype, season) %>% unique())
 n_seasons <- n_distinct(epid_pars$season)
 message('\n', length(total_fitted_pars),' fitted parameters, ', 
@@ -260,8 +284,12 @@ message('\n', length(total_fitted_pars),' fitted parameters, ',
 
 epids_actual <- n_distinct(mcmc_samples$epidemic)
 if(3 %in% unique(mcmc_samples$epidemic)){epids_actual <- epids_actual - 17/38}
-total_actual_fitted_pars <- (ncol(mcmc_samples) - 4)*epids_actual
+total_actual_fitted_pars <- (ncol(mcmc_samples) - 7)*epids_actual
 message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '')
+
+message('\n', n_distinct(mcmc_samples$epidemic),' seasons in the mcmc_samples file.\n', sep = '')
+message('\n', mcmc_samples %>% group_by(epidemic) %>% 
+                     summarise(chains = n_distinct(chain)) %>% select(chains),' chains per season.\n', sep = '')
 
 fitted_pars <- unique(epid_pars$name)
 fitted_pars <- fitted_pars[substr(fitted_pars, 1, 4) != 'Reff']
@@ -271,7 +299,9 @@ posterior_cols <- c(paste0(fitted_pars_not_imd, '_epid_1'),
                     paste0(fitted_pars_not_imd, '_epid_2'), 
                     fitted_pars_imd)
 
-admin_cols <- c('likelihood', 'chain', 'iteration', 'epidemic')
+admin_cols <- c('likelihood',
+                'healthcare_likelihood', 'subtype_likelihood',
+                'job', 'chain', 'iteration', 'epidemic')
 colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
 
@@ -352,9 +382,10 @@ ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_filtered_trace')
 
 message('Plotting log-likelihood')
 log_likelihood_plot <- plot_trace('likelihood'); log_likelihood_plot
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 6)
+ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 8)
 
 ## PAIRWISE PLOTS
+
 message('Plotting pairwise correlations')
 mcmc_samples_filtered[, chain_it_id := paste0(chain, '_', iteration)]
 
@@ -370,7 +401,12 @@ pairs_data <- if(nrow(mcmc_samples_filtered) >= 10000){
 pairs_long <- melt(pairs_data, id.vars = c('epidemic', 'chain_it_id'))
 pairs_long[, variable := as.character(variable)]
 pairs_long[, epidemic_of_season := as.numeric(substr(variable, nchar(variable), nchar(variable)))]
-pairs_long[, variable := substr(variable, 1, nchar(variable) - 7)]
+pairs_long[substr(variable, 1, 3) == 'imd', epidemic_of_season := 1]
+add_imd_data <- pairs_long[substr(variable, 1, 3) == 'imd',]
+add_imd_data[, epidemic_of_season := 2]
+pairs_long <- rbind(pairs_long,
+                    add_imd_data)
+pairs_long[substr(variable, 1, 3) != 'imd', variable := substr(variable, 1, nchar(variable) - 7)]
 
 pairs_long <- pairs_long[subtype_seasons, on = c('epidemic','epidemic_of_season')]
 pairs_long[, subtype_season := paste0(season, ': ', subtype)]
@@ -387,6 +423,7 @@ pairs_wide[,chain_it_id := NULL]
 p_FULL <- ggpairs(pairs_wide, columns = 2:ncol(pairs_wide), aes(color = as.factor(subtype_season), alpha = 0.5))
 ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_pairwise'),.args[length(.args)]),
        plot = p_FULL, width = 40, height = 40)
+
 
 #### SAVE DATA ####
 

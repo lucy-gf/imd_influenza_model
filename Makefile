@@ -37,13 +37,6 @@ RENV = .Rprofile
 ${RENV}: install.R 
 	 Rscript --vanilla $^
 
-# ages 
-ALLAGES ?= 0-4 5-9 10-14 15-19 20-24 25-29 30-34 35-39 40-44 45-49 50-54 55-59 60-64 65-69 70-74 75+
-NHSAGES ?= 0-4 5-11 12-17 18-25 26-34 35-49 50-69 70-79 80+
-
-# sensitivity analyses
-SENS_ANALYSES ?= base regional
-
 ##### INPUTS ###################################################################
 
 ${INPUTDIR}/contact_matrix.rds: ${SETUPDIR}/load_contact_data.R ${CMDIR}/fitted_matrs_balanced.csv

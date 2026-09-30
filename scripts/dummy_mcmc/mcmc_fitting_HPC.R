@@ -17,7 +17,7 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "dummy_data", "known_parameters.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
 
-bash_args <- as.numeric(commandArgs(trailingOnly = TRUE))
+bash_args <- if (interactive()) c(1, 5) else as.numeric(commandArgs(trailingOnly = TRUE))
 
 i <- bash_args[1]
 chain <- bash_args[2]
@@ -155,7 +155,7 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 n_pop <- 1
 burn_in <- 0
 thinning_value <- 5
-n_samples <- 3000
+n_samples <- 1000
 
 # n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
 # if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
@@ -189,7 +189,8 @@ write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
                      date = Sys.Date()), .args[6])
 
 # save actual data
-write_rds(mcmc_results, gsub('.rds',paste0('_', i, '_', burn_in,'_',thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
+write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',
+                                           thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
                              .args[6]))
 
 

@@ -33,8 +33,11 @@ run_mcmc_inference <- function(
   n_subtypes <- n_distinct(subtype_season$subtype)
   n_pars_per_subtype <- (length(initial_parameters) - 4)/2
   
+  # if n_pop < 3, DEzs sampler will require 3 chains
+  n_pop_internal <- max(n_pop, 3)
+    
   ll_call_count <- 0
-  ll_total_calls <- (nburn + n_samples * thinning)/n_pop
+  ll_total_calls <- (nburn + n_samples*thinning) / n_pop
   
   txt_out <- file.path('mcmc_output',paste0('index_',txt_output,'.txt'))
   
@@ -264,8 +267,8 @@ run_mcmc_inference <- function(
           min_modelled_proportion = min(modelled_proportion[modelled_proportion != 0]),
           max_modelled_proportion = max(modelled_proportion[modelled_proportion != 1]),
           modelled_proportion = case_when(
-            modelled_proportion == 0 ~ min_modelled_proportion/1e10,
-            modelled_proportion == 1 ~ 1 - (1 - max_modelled_proportion)/1e10,
+            modelled_proportion == 0 ~ min_modelled_proportion/1e3,
+            modelled_proportion == 1 ~ 1 - (1 - max_modelled_proportion)/1e3,
             T ~ modelled_proportion
         )) %>% select(!c(min_modelled_proportion, max_modelled_proportion))
       
@@ -311,6 +314,9 @@ run_mcmc_inference <- function(
                                observed_data,
                                by = c('age_grp', 'imd_quintile', 'week_start', 'risk_level', 'setting'), 
                                all.x = F)
+    
+    # Add 1e-10 where time_series_joint$expected_cases is 0
+    time_series_joint[expected_cases == 0, expected_cases := 1e-10]
     
     if(F){
       time_series_joint %>% ## plot {observations} against {infections x reporting rates}
@@ -625,13 +631,13 @@ run_mcmc_inference <- function(
   )
   
   settings <- list(
-    iterations = nburn + n_samples*thinning, ## setup to save all (pre-thinning etc.)
+    iterations = (nburn + n_samples*thinning) * n_pop_internal / n_pop,
     burnin = 0,
     thin = 1,
-    message = T, 
-    nrChains=n_chains,
-    startValue = prior$sampler(n_pop) 
-  ) 
+    message = T,
+    nrChains = n_chains,
+    startValue = prior$sampler(n_pop_internal)
+  )
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
   
@@ -701,7 +707,7 @@ plot_density <- function(var, filtered = T){
         geom_density(aes(x = value, fill = as.factor(chain), group = chain), alpha = 0.4) +
         geom_vline(aes(xintercept = true_value, alpha = true_value_NA), lty=2) +
         scale_alpha_manual(values = c(1,0)) +
-        theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
+        theme_lg() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
         facet_grid(.~subtype_season, scales = 'free') +
         theme(legend.position = 'none') +
       labs(y = var_label)
@@ -723,7 +729,7 @@ plot_density <- function(var, filtered = T){
       geom_density(aes(x = value, fill = as.factor(chain), group = chain), alpha = 0.4) +
       geom_vline(aes(xintercept = true_value, alpha = true_value_NA), lty=2) +
       scale_alpha_manual(values = c(1,0)) +
-      theme_bw() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
+      theme_lg() + labs(y = ifelse(var=='R0', 'R0 (calculated after)', var)) +
       facet_grid(.~season, scales = 'free') +
       theme(legend.position = 'none') +
       labs(y = var_label)
@@ -746,8 +752,9 @@ plot_trace <- function(var, filtered = F){
   var_label <- if(var=='Reff'){'Reff (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var_label}
   }
+  if(var=='likelihood'){var_label <- 'Log-likelihood'}
   
-  use_colors <- n_distinct(data$chain) <= 10
+  use_colors <- n_distinct(data$job) <= 10
   
   epid_pars_joining <- epid_pars %>% 
     mutate(true_value = value) %>% 
@@ -759,8 +766,8 @@ plot_trace <- function(var, filtered = F){
     var_column <- colnames(data)[substr(colnames(data), 1, nchar(colnames(data)) - 7) == var]
       
     p <- data %>%
-      select(iteration, epidemic, chain, !!!syms(var_column)) %>% 
-      pivot_longer(!c(iteration,epidemic,chain)) %>%
+      select(iteration, epidemic, chain, job, !!!syms(var_column)) %>% 
+      pivot_longer(!c(iteration,epidemic,chain, job)) %>%
       mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
              name = substr(name, 1, nchar(name) - 7)) %>% 
       left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
@@ -774,7 +781,7 @@ plot_trace <- function(var, filtered = F){
       geom_hline(aes(yintercept = true_value, alpha = true_value_NA), lty=2) +
       scale_alpha_manual(values = c(1,0)) +
       facet_grid(.~subtype_season) +
-      theme_bw() + labs(y = var_label) +
+      theme_lg() + labs(y = var_label) +
       theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
     
   }else{
@@ -784,25 +791,47 @@ plot_trace <- function(var, filtered = F){
       epid_pars_joining <- epid_pars %>% 
         select(epidemic, season) %>% unique()
       
-      p <- data %>% select(iteration, epidemic, chain, !!!syms(var)) %>%
-        pivot_longer(!c(iteration,epidemic,chain)) %>%
+      p <- data %>% select(iteration, epidemic, chain, job,
+                           likelihood) %>%
+        pivot_longer(!c(iteration,epidemic,chain,job)) %>%
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
         ggplot() +
-        geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain)) +
         geom_hline(yintercept = 0, lty=2) +
-        facet_grid(.~season) +
-        theme_bw() + labs(y = var_label) +
+        facet_grid(.~season, scales = 'free') +
+        theme_lg() + labs(y = var_label) + 
         theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
+      
+      p2 <- data %>% select(iteration, epidemic, chain,
+                      healthcare_likelihood,
+                      subtype_likelihood) %>%
+        pivot_longer(!c(iteration,epidemic,chain)) %>%
+        left_join(epid_pars_joining, by = c('epidemic')) %>% 
+        filter(!is.na(season)) %>% # remove non-real epidemics
+        mutate(epidemic = paste0("Season ", epidemic)) %>% 
+        group_by(iteration, epidemic, season, name) %>% 
+        summarise(value = mean(value, na.rm = T)) %>% 
+        filter(value != -Inf) %>% 
+        mutate(name = gsub('_',' ', name)) %>% 
+        ggplot() +
+        geom_bar(aes(iteration/1000, y = value, fill = name),
+                 position = 'fill', stat = 'identity', width = 1/1000) +
+        scale_fill_manual(values = c('#FF84E8','#7F2CCB')) +
+        facet_grid(.~season, scales = 'free') +
+        theme_minimal() + labs(y = 'Proportion of log-likelihood', fill = '') + 
+        scale_x_continuous(expand = expansion(c(0,0))) + 
+        scale_y_continuous(expand = expansion(c(0,0))) + 
+        theme(legend.position = 'bottom') +
+        labs(x = 'Iteration (1000s)'); p2
       
     }else{
       
       epid_pars_joining <- epid_pars_joining %>% 
         select(!c(subtype, epidemic_of_season)) %>% unique()
       
-      p <- data %>% select(iteration, epidemic, chain, !!!syms(var)) %>%
-        pivot_longer(!c(iteration,epidemic,chain)) %>%
+      p <- data %>% select(iteration, epidemic, chain, job, !!!syms(var)) %>%
+        pivot_longer(!c(iteration,epidemic,chain, job)) %>%
         left_join(epid_pars_joining, by = c('epidemic','name')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(true_value_NA = case_when(is.na(true_value) ~ T, 
@@ -813,7 +842,7 @@ plot_trace <- function(var, filtered = F){
         geom_hline(aes(yintercept = true_value, alpha = true_value_NA), lty=2) +
         scale_alpha_manual(values = c(1,0)) +
         facet_grid(.~season) +
-        theme_bw() + labs(y = var_label) +
+        theme_lg() + labs(y = var_label) +
         theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
       
     }
@@ -827,7 +856,8 @@ plot_trace <- function(var, filtered = F){
   if(use_colors){
     
     p <- p +
-      geom_line(aes(x = iteration/1000, y = value, col = as.factor(chain), group = chain))
+      geom_line(aes(x = iteration/1000, y = value, col = as.factor(job), group = chain),
+                alpha = 0.4)
       
   }else{
     
@@ -836,7 +866,15 @@ plot_trace <- function(var, filtered = F){
     
   }
   
-  p
+  if(var == 'likelihood'){
+    
+    p + p2 + plot_layout(nrow = 2)
+    
+  }else{
+    
+    p
+    
+  }
   
 }
 
