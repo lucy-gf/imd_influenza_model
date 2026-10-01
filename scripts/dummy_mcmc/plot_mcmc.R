@@ -251,7 +251,7 @@ read_and_get_samples <- function(i){
 }
 
 # load most recently run settings (burn in, thinning, samples)
-output_details_file <- data.table(x = number_str, date = run_date, HPC=T) #readRDS(.args[8])
+output_details_file <- readRDS(.args[8])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 message('\n------------\nDate run: ',as.character(run_date),'\n------------',sep='')
