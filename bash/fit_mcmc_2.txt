@@ -1,0 +1,16 @@
+#!/bin/bash
+#SBATCH --job-name=2_fit_mcmc # Job name
+#SBATCH --mail-type=BEGIN,END,FAIL # Mail events (NONE, BEGIN, END, FAIL, AL$
+#SBATCH --mail-user=lshlg12@lshtm.ac.uk # Where to send mail
+#SBATCH --ntasks=1
+#SBATCH --array=1-10
+#SBATCH --nodes=1 # Run all processes on a single node
+#SBATCH --mem=100gb # Job memory request
+#SBATCH --time=150:00:00 # Time limit hrs:min:sec
+#SBATCH --output=outputs/mcmc_2_%a.log # Standard output and error log 
+pwd; hostname; date
+echo "time started"
+cd imd_influenza_model
+Rscript scripts/dummy_mcmc/mcmc_fitting_HPC.R 2 ${SLURM_ARRAY_TASK_ID}
+date
+echo "time ended"

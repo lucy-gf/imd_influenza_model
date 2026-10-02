@@ -1,0 +1,199 @@
+## SETTING UP SUBTYPE-YEARS ##
+
+## PLOTTING UKHSA WEEKLY STRAIN DATA ##
+
+#### SETUP ####
+suppressMessages(require(ggplot2))
+suppressMessages(require(patchwork))
+suppressMessages(require(tidyverse))
+suppressMessages(require(data.table))
+suppressMessages(require(viridis))
+suppressMessages(require(readr))
+suppressMessages(require(readODS))
+options(dplyr.summarise.inform = FALSE) 
+
+.args <- if (interactive()) c(
+  file.path("data", "ukhsa", "annual_influenza_2025_2026.ods"),
+  file.path("data", "inputs", "subtype_years.rds")
+) else commandArgs(trailingOnly = TRUE)
+
+source(file.path('scripts','setup','colors.R'))
+source(file.path('scripts','setup','base_functions.R'))
+
+## read in UKHSA data
+## from: https://www.gov.uk/government/statistics/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026/influenza-in-the-uk-annual-epidemiological-report-winter-2025-to-2026#laboratory-surveillance
+ukhsa_dat <- read_ods(.args[1], sheet = 48, skip = 3)
+
+# rename columns
+colnames(ukhsa_dat) <- c('date', 'week', 'flu_a_unsubtyped', 'flu_a_h1n1pdm09',
+                         'flu_a_h3n2', 'flu_b', 'positivity')
+
+ukhsa_dat <- ukhsa_dat %>% mutate(positivity = positivity/100,
+                                  date_formatted = as.Date(date, format = '%d %b %Y'),
+                                  flu_a = flu_a_unsubtyped + flu_a_h1n1pdm09 + flu_a_h3n2,
+                                  flu_tot = flu_a + flu_b) %>% 
+  mutate(season = case_when(
+    week <= 26 ~ paste0(year(date_formatted + 3) - 1, '/', substr(year(date_formatted + 3), 3, 4)),
+    T ~ paste0(year(date_formatted + 3), '/', substr(year(date_formatted + 3) + 1, 3, 4))))
+
+absolute_plot <- function(min_year = 2021,
+                          all_a = F){
+  
+  if(!all_a){
+    p <- ukhsa_dat %>% 
+      filter(year(date_formatted) >= min_year) %>% 
+      select(date_formatted, flu_a, flu_b) %>% 
+      pivot_longer(!date_formatted) %>% 
+      group_by(date_formatted) %>% mutate(TOTPOS = sum(value)) %>% 
+      ggplot() + 
+      geom_line(aes(date_formatted, TOTPOS),
+                lwd = 0.6, lty = 2) +
+      geom_line(aes(date_formatted, value, col = name, group = name),
+                lwd = 0.8) +
+      scale_color_manual(values = flu_subtype_colors,
+                         labels = flu_subtype_names) +
+      scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+      labs(x = '', y = 'Positive tests', col = '') +
+      theme_bw(); p
+  }else{
+    p <- ukhsa_dat %>% 
+      filter(year(date_formatted) >= min_year) %>% 
+      select(date_formatted, starts_with('flu_')) %>% 
+      select(!c(flu_a, flu_tot)) %>% 
+      pivot_longer(!date_formatted) %>% 
+      group_by(date_formatted) %>% mutate(TOTPOS = sum(value)) %>% 
+      ggplot() + 
+      geom_line(aes(date_formatted, TOTPOS),
+                lwd = 0.6, lty = 2) +
+      geom_line(aes(date_formatted, value, col = name, group = name),
+                lwd = 0.8) +
+      scale_color_manual(values = flu_subtype_colors,
+                         labels = flu_subtype_names) +
+      scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+      labs(x = '', y = 'Positive tests', col = '') +
+      theme_bw(); p
+  }
+  
+  p
+  
+}
+
+abs_timeseries <- absolute_plot(min_year = 2021, all_a = T); abs_timeseries
+
+min_season <- 2023
+
+ukhsa_dat %>% 
+  mutate(season = case_when(
+    week <= 26 ~ paste0(year(date_formatted) - 1, '/', substr(year(date_formatted), 3, 4)),
+    T ~ paste0(year(date_formatted), '/', substr(year(date_formatted) + 1, 3, 4)))) %>% 
+  filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
+  select(season, date_formatted, starts_with('flu_')) %>% 
+  select(!c(flu_a, flu_tot)) %>% 
+  pivot_longer(!c(season, date_formatted)) %>% 
+  rename(subtype = name) %>% 
+  group_by(season, subtype) %>% 
+  summarise(mean = mean(value)) %>% 
+  filter(!subtype %like% 'subtype') %>% 
+  ggplot() + geom_bar(aes(x = season, fill = subtype, y = mean),
+                      position = 'dodge', stat = 'identity') + 
+  theme_bw() +
+  scale_fill_manual(values = flu_subtype_colors)
+  
+ukhsa_dat %>% 
+  filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
+  select(season, date_formatted, starts_with('flu_')) %>% 
+  select(!c(flu_a, flu_tot)) %>% 
+  pivot_longer(!c(season, date_formatted)) %>% 
+  rename(subtype = name) %>% 
+  filter(!subtype %like% 'subtype') %>% 
+  group_by(season, subtype) %>% 
+  mutate(week = 1:n(),
+         peak = which.max(value)) %>% 
+  filter(week == peak)
+
+ukhsa_dat %>% 
+  filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
+  select(season, date_formatted, starts_with('flu_')) %>% 
+  select(!c(flu_a, flu_tot)) %>% 
+  pivot_longer(!c(season, date_formatted)) %>% 
+  rename(subtype = name) %>% 
+  filter(!subtype %like% 'subtype') %>% 
+  group_by(season, subtype) %>% 
+  mutate(week = 1:n(),
+         peak = which.max(value)) %>% 
+  ggplot() + 
+  geom_hline(aes(yintercept = 51), lty = 3, alpha = 0.5) + 
+  geom_vline(aes(xintercept = date_formatted, 
+                 col = subtype,
+                 alpha = (week == peak)),
+             lty = 2) +
+  geom_line(aes(date_formatted, value, col = subtype, group = subtype),
+            lwd = 0.8) +
+  scale_alpha_manual(values = c(0, 1)) + 
+  scale_color_manual(values = flu_subtype_colors,
+                     labels = flu_subtype_names) +
+  scale_y_continuous(expand = expansion(c(0,0.1))) + 
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  labs(x = '', y = 'Positive tests', col = '') +
+  theme_bw()
+
+subtype_info_raw <- ukhsa_dat %>% 
+  mutate(total_tests = flu_tot/positivity) %>% 
+  filter(as.numeric(substr(season, 1, 4)) >= min_season) %>% 
+  select(season, date_formatted, starts_with('flu_'), total_tests) %>% 
+  select(!c(flu_a, flu_tot)) 
+
+# assign flu_a_unsubtyped to flu_a_h1n1pdm09 or flu_a_h3n2
+for(i in 1:nrow(subtype_info_raw)){
+  
+  assigned_h1n1 <- sum(sample(x = c(1, 0), 
+                          size = subtype_info_raw$flu_a_unsubtyped[i],
+                          replace = T,
+                          prob = c(subtype_info_raw$flu_a_h1n1pdm09[i], subtype_info_raw$flu_a_h3n2[i])
+                          ))
+  
+  assigned_h3n2 <- subtype_info_raw$flu_a_unsubtyped[i] - assigned_h1n1
+  
+  subtype_info_raw$flu_a_unsubtyped[i] <- 0
+  subtype_info_raw$flu_a_h1n1pdm09[i] <- assigned_h1n1
+  subtype_info_raw$flu_a_h3n2[i] <- assigned_h3n2
+  
+}
+
+subtype_info <- subtype_info_raw %>% 
+  pivot_longer(!c(season, date_formatted, total_tests)) %>% 
+  rename(subtype = name) %>% 
+  group_by(season, subtype) %>% 
+  mutate(mean = mean(value),
+         week = 1:n(),
+         peak = which.max(value)) %>% ungroup() %>% 
+  mutate(peak_qual = case_when(peak > 30 ~ 'Late', T ~ 'Normal')) %>% 
+  filter(mean > 50) %>% 
+  group_by(season, week, total_tests) %>% 
+  mutate(tot_pos = sum(value)) %>% ungroup() %>% 
+  mutate(proportion = value/tot_pos,
+         subtype = convert_to_subtype(subtype)) %>% select(!tot_pos) %>% 
+  group_by(season, week) %>% mutate(total_flu = sum(value)) %>% ungroup()
+
+plot_subtype_data <- subtype_info %>% filter(!is.na(proportion)) %>% 
+  group_by(season) %>% mutate(max_pos_tests = max(total_flu), week_max = total_flu == max_pos_tests)
+
+plot_subtype_data %>% 
+  ggplot() + 
+  geom_bar(aes(week, proportion, fill = subtype),
+           position = 'stack', stat = 'identity', width = 1) +
+  geom_line(aes(week, total_flu/max(total_flu)), lwd = 1) +
+  geom_label(data = plot_subtype_data %>% filter(week_max),
+             aes(week + 6, -0.1 + total_flu/max(total_flu) + 0.15*(max_pos_tests != max(total_flu)),
+                label = paste0('max. positive flu\ntests: ', max_pos_tests)), alpha = 0.4) + 
+  theme_minimal() +
+  scale_fill_manual(values = subtype_colors) +
+  scale_alpha_manual(values = c(0,1)) +
+  scale_y_continuous(expand = expansion(c(0,0))) +
+  scale_x_continuous(expand = expansion(c(0,0))) +
+  facet_grid(season ~ .) + labs(y = 'proportion of positive flu tests')
+ggsave(file.path('output','figures','dummy_infections','ukhsa_subtypes.png'),
+       width = 10, height = 10)
+  
+write_rds(subtype_info, .args[2])
+
