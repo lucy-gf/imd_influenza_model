@@ -181,7 +181,8 @@ run_mcmc_inference <- function(
         trans = get(paste0('transmissibility_', k)),
         susc = get(paste0('susceptibility_vec_', k)),
         lat_per = epid_periods[1],
-        inf_per = epid_periods[2]
+        inf_per = epid_periods[2],
+        t_end = ifelse(epid_subtype == 'B', 300, 250)
       )
       
       ## add start date (using first of september throughout)
@@ -326,27 +327,38 @@ run_mcmc_inference <- function(
         facet_grid(age_grp ~ imd_quintile, scales = 'free')
     }
     
-    # Vectorised log likelihood
+    time_series_primary <- time_series_joint[setting == 'primary_care',]
+    time_series_secondary <- time_series_joint[setting == 'secondary_care',]
+    
+    # Vectorised log likelihood, primary care
     ll_1 <- sum(dpois(
-      x    = time_series_joint$observations,
-      lambda = time_series_joint$expected_cases,
+      x    = time_series_primary$observations,
+      lambda = time_series_primary$expected_cases,
+      log  = TRUE
+    ), na.rm = TRUE)
+    
+    # Vectorised log likelihood, secondary care
+    ll_2 <- sum(dpois(
+      x    = time_series_secondary$observations,
+      lambda = time_series_secondary$expected_cases,
       log  = TRUE
     ), na.rm = TRUE)
     
     if(n_subtypes == 2){
       
-      ll_2 <- sum(dbinom(
+      # Vectorised log-likelihood, subtype proportions
+      ll_3 <- sum(dbinom(
         x    = weekly_props$epidemic_1_positive,
         size = weekly_props$total_flu,
         p    = weekly_props$modelled_proportion,
         log  = TRUE
       ), na.rm = TRUE)
       
-    }else{ ll_2 <- 0 }
+    }else{ ll_3 <- 0 }
     
-    assign(make_key(pars), c(ll_1, ll_2), envir = LLcache)
+    assign(make_key(pars), c(ll_1, ll_2, ll_3), envir = LLcache)
     
-    total_ll <- ll_1 + ll_2
+    total_ll <- ll_1 + ll_2 + ll_3
     
     if(is.nan(total_ll) | is.infinite(total_ll)) return(-Inf)
     
@@ -358,7 +370,7 @@ run_mcmc_inference <- function(
     
     if (ll_call_count == 0) { ll_start_time <<- Sys.time() }
     ll_call_count <<- ll_call_count + 1
-    mod_val <- if (ll_total_calls < 20) 1 else if (ll_total_calls < 1000) 10 else 50
+    mod_val <- if (ll_total_calls < 100) 10 else if (ll_total_calls < 2000) 100 else 1000
     if (ll_call_count %% mod_val == 0) {
       elapsed   <- as.numeric(difftime(Sys.time(), ll_start_time, units = 'mins'))
       rate      <- ll_call_count / elapsed
@@ -634,7 +646,7 @@ run_mcmc_inference <- function(
     iterations = (nburn + n_samples*thinning) * n_pop_internal / n_pop,
     burnin = 0,
     thin = 1,
-    message = T,
+    message = F,
     nrChains = n_chains,
     startValue = prior$sampler(n_pop_internal)
   )
@@ -646,10 +658,10 @@ run_mcmc_inference <- function(
   lookupComponents <- function(chainMat, cache, nPar) {
     parMat <- chainMat[, 1:nPar, drop = FALSE]
     comp <- t(apply(parMat, 1, function(par) {
-      val <- mget(make_key(par), envir = cache, ifnotfound = list(c(NA_real_, NA_real_)))[[1]]
+      val <- mget(make_key(par), envir = cache, ifnotfound = list(c(NA_real_, NA_real_, NA_real_)))[[1]]
       val
     }))
-    colnames(comp) <- c("LL1", "LL2")
+    colnames(comp) <- c("LL1", "LL2","LL3")
     coda::mcmc(cbind(chainMat, comp))
   }
   
@@ -803,8 +815,21 @@ plot_trace <- function(var, filtered = F){
         theme_lg() + labs(y = var_label) + 
         theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
       
+      p_filt <- data %>% select(iteration, epidemic, chain, job,
+                           likelihood) %>%
+        pivot_longer(!c(iteration,epidemic,chain,job)) %>%
+        left_join(epid_pars_joining, by = c('epidemic')) %>% 
+        filter(!is.na(season)) %>% # remove non-real epidemics
+        mutate(epidemic = paste0("Season ", epidemic)) %>% 
+        filter(iteration > max(iteration)/4) %>% 
+        ggplot() +
+        geom_hline(yintercept = 0, lty=2) +
+        facet_grid(.~season, scales = 'free') +
+        theme_lg() + labs(y = var_label) + 
+        theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
+      
       p2 <- data %>% select(iteration, epidemic, chain,
-                      healthcare_likelihood,
+                      gp_likelihood, hospital_likelihood,
                       subtype_likelihood) %>%
         pivot_longer(!c(iteration,epidemic,chain)) %>%
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
@@ -817,7 +842,7 @@ plot_trace <- function(var, filtered = F){
         ggplot() +
         geom_bar(aes(iteration/1000, y = value, fill = name),
                  position = 'fill', stat = 'identity', width = 1/1000) +
-        scale_fill_manual(values = c('#FF84E8','#7F2CCB')) +
+        scale_fill_manual(values = c('#57A773','#157145','#9BD1E5')) +
         facet_grid(.~season, scales = 'free') +
         theme_minimal() + labs(y = 'Proportion of log-likelihood', fill = '') + 
         scale_x_continuous(expand = expansion(c(0,0))) + 
@@ -868,7 +893,11 @@ plot_trace <- function(var, filtered = F){
   
   if(var == 'likelihood'){
     
-    p + p2 + plot_layout(nrow = 2)
+    p_filt <- p_filt +
+      geom_line(aes(x = iteration/1000, y = value, col = as.factor(job), group = chain),
+                alpha = 0.4)
+    
+    p + p_filt + p2 + plot_layout(nrow = 3)
     
   }else{
     

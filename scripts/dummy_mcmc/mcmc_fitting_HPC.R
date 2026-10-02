@@ -155,7 +155,7 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 n_pop <- 1
 burn_in <- 0
 thinning_value <- 5
-n_samples <- 1000
+n_samples <- 20000
 
 # n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
 # if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM

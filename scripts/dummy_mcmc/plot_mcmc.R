@@ -195,7 +195,7 @@ read_and_get_samples <- function(i){
   
   get_samples_parallel <- function(k){
     samp <- data.table(dat$chain[[k]])
-    llcomps <- dat$LLcomponents[[k]][, c('LL1','LL2')]
+    llcomps <- dat$LLcomponents[[k]][, c('LL1','LL2','LL3')]
     samp <- cbind(samp, llcomps)
     samp[, job := chain_job]
     samp[, chain := k + length(dat$chain)*(chain_job - 1)]
@@ -284,7 +284,7 @@ message('\n', length(total_fitted_pars),' fitted parameters, ',
 
 epids_actual <- n_distinct(mcmc_samples$epidemic)
 if(3 %in% unique(mcmc_samples$epidemic)){epids_actual <- epids_actual - 17/38}
-total_actual_fitted_pars <- (ncol(mcmc_samples) - 7)*epids_actual
+total_actual_fitted_pars <- (ncol(mcmc_samples) - 8)*epids_actual
 message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '')
 
 message('\n', n_distinct(mcmc_samples$epidemic),' seasons in the mcmc_samples file.\n', sep = '')
@@ -300,7 +300,7 @@ posterior_cols <- c(paste0(fitted_pars_not_imd, '_epid_1'),
                     fitted_pars_imd)
 
 admin_cols <- c('likelihood',
-                'healthcare_likelihood', 'subtype_likelihood',
+                'gp_likelihood', 'hospital_likelihood', 'subtype_likelihood',
                 'job', 'chain', 'iteration', 'epidemic')
 colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
@@ -382,7 +382,7 @@ ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_filtered_trace')
 
 message('Plotting log-likelihood')
 log_likelihood_plot <- plot_trace('likelihood'); log_likelihood_plot
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 8)
+ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 10)
 
 ## PAIRWISE PLOTS
 

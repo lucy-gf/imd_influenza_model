@@ -92,21 +92,25 @@ NumericMatrix run_seir_cpp(
     
     // Euler update (identical to odin deriv() equations)
     for (int i = 0; i < ng; i++) {
-      S[i]    += dt * (-newInf[i]);
-      E1[i]   += dt * (newInf[i]  - progE1[i]);
+      double dn = dt * (newInf[i]);
+      double dnv = dt * (newInfv[i]);
+      
+      S[i]    -= dn;
+      E1[i]   += dn - dt * progE1[i];
       E2[i]   += dt * (progE1[i]  - progE2[i]);
       I1[i]   += dt * (progE2[i]  - progI1[i]);
       I2[i]   += dt * (progI1[i]  - progI2[i]);
       R[i]    += dt * (progI2[i]);
-      Sv[i]    += dt * (-newInfv[i]);
-      E1v[i]   += dt * (newInfv[i]  - progE1v[i]);
+      Sv[i]    -= dnv;
+      E1v[i]   += dnv - dt * progE1v[i];
       E2v[i]   += dt * (progE1v[i]  - progE2v[i]);
       I1v[i]   += dt * (progE2v[i]  - progI1v[i]);
       I2v[i]   += dt * (progI1v[i]  - progI2v[i]);
       Rv[i]    += dt * (progI2v[i]);
-      cumI[i] += dt * (newInf[i]);
-      cumIv[i] += dt * (newInfv[i]);
+      cumI[i] += dn;
+      cumIv[i] += dnv;
       // V is constant (deriv = 0), no update needed
+      
     }
     
     t += dt;
