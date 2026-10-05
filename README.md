@@ -113,8 +113,6 @@ Output is written to `output/`, with subdirectories for figures (`output/figures
 
 This is work in progress! Examples of elements which are not yet in the model:
 
-``🧓`` Updated age groups (will be changed to 0-4, 5-11, 12-17, 18-29, 30-49, 50-64, 65-74, 75-84, 85+)
-
 ``💉`` Better-informed estimates of VE against infection 
 
 ``🎆`` Changes in social mixing in the holiday period
