@@ -181,7 +181,9 @@ not_xmas_matrix <- calc_matrix(reconnect_NOT_XMAS,
 
 # combine
 holiday_cm <- not_xmas_matrix %>% 
-  left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('_nx','_x'))
+  left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('_nx','_x')) %>% 
+  mutate(diff = value_x - value_nx,
+         propdiff = diff/value_nx)
 
 #### PLOT ####
 max_value <- max(c(xmas_matrix$value,
@@ -212,7 +214,7 @@ pnx <- not_xmas_matrix %>%
 pdiff <- holiday_cm %>% 
   ggplot() + 
   geom_tile(aes(x = part_age, y = cont_age, 
-                fill = value_x - value_nx)) +
+                fill = diff)) +
   geom_label(aes(x = part_age, y = cont_age,
                  label = round(value_x - value_nx, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
   labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
@@ -224,7 +226,7 @@ pdiff <- holiday_cm %>%
 pdiffprop <- holiday_cm %>% 
   ggplot() + 
   geom_tile(aes(x = part_age, y = cont_age, 
-                fill = (value_x - value_nx)/value_nx)) +
+                fill = propdiff)) +
   geom_label(aes(x = part_age, y = cont_age,
                  label = paste0(100*round((value_x - value_nx)/value_nx, 2),'%')), 
              col = 'black', fill = 'white', alpha = 0.5) + 
@@ -239,14 +241,5 @@ pnx + px +
 ggsave(file.path('output','figures','exploration','holiday_contacts.png'),
        width = 16, height = 13)
 
-
 #### SAVE HOLIDAY MATRIX ####
 write_rds(holiday_cm, .args[4])
-
-
-
-
-
-
-
-
