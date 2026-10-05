@@ -16,6 +16,7 @@ options(dplyr.summarise.inform = FALSE)
   file.path("data", "dummy_data", "dummy_surveillance.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
+source(file.path('scripts','setup','base_functions.R'))
 source(file.path('scripts','setup','colors.R'))
 source(file.path('scripts','seir_model.R'))
 
@@ -28,6 +29,13 @@ infections <- readRDS(.args[1])
 ## KNOWN PARAMETERS
 known_pars <- readRDS(.args[2])
 years <- known_pars$years
+
+age_labels <- unique(known_pars$proportion_observed$age_grp)
+broad_ages <- data.table(
+  age_grp = age_labels,
+  broad_age = fcn_assign_ages('children','adult','older_adult',
+                              age_labels)
+)
 
 vaccinated_data <- known_pars$vaccinated_data
 
@@ -225,8 +233,9 @@ sd_plot <- surveillance_data %>%
   left_join(opensafely_coverage,
             by = c('age_grp','imd_quintile','risk_level')) %>% 
   mutate(pop = pop*OS_COVERAGE) %>% select(!OS_COVERAGE) %>% 
+  left_join(broad_ages, by = 'age_grp') %>% 
   mutate(age_grp = case_when( ## aggregate adult cases
-    age_grp %in% c('18-25','26-34','35-49','50-69') ~ '18-69',
+    broad_age == 'adult' ~ '18-64',
     T ~ age_grp)) %>% 
   group_by(week_start, age_grp, imd_quintile) %>% 
   summarise(primary_care = sum(primary_care),
@@ -236,7 +245,7 @@ sd_plot <- surveillance_data %>%
          secondary_care = 100000*secondary_care/pop)
 
 sd_plot$age_grp <- factor(sd_plot$age_grp,
-                          levels = c('0-4','5-11','12-17','18-69','70-79','80+'))
+                          levels = c('0-4','5-11','12-17','18-64','65-74','75-84','85+'))
 
 sd_plot %>% 
   ggplot() +

@@ -154,7 +154,7 @@ fcn_assign_ages <- function(
     ){
   
   n_c <- 3
-  n_a <- 4
+  n_a <- 3
   n_o_a <- length(age_labels_in) - n_c - n_a
   
   vector <- c(rep(child_value, n_c),

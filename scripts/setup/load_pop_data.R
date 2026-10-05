@@ -52,9 +52,9 @@ ages_1 <- seq(0, 75, 5)
 ages_1_names <- paste0(ages_1, '-', lead(ages_1) - 1)
 ages_1_names[length(ages_1_names)] <- '75+'
 
-ages_2 <- c(0,5,12,18,26,35,50,70,80)
+ages_2 <- c(0,5,12,18,30,50,65,75,85)
 ages_2_names <- paste0(ages_2, '-', lead(ages_2) - 1)
-ages_2_names[length(ages_2_names)] <- '80+'
+ages_2_names[length(ages_2_names)] <- '85+'
 
 ## make
 

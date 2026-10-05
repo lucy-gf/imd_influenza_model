@@ -54,7 +54,6 @@ Rplots.pdf
 /mcmc_output
 #/bash
 /data/population
-/data/contact_matrix
 /data/dummy_data
 /data/ukhsa
 README.html
