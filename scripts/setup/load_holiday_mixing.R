@@ -178,18 +178,22 @@ not_xmas_matrix <- calc_matrix(reconnect_NOT_XMAS,
                                reciprocal = T,
                                age_pop = broad_age_pop,
                                age_limits_in = broad_age_limits)
+main_matrix <- calc_matrix(reconnect, 
+                           reciprocal = T,
+                           age_pop = broad_age_pop,
+                           age_limits_in = broad_age_limits)
 
 # combine
-holiday_cm <- not_xmas_matrix %>% 
-  left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('_nx','_x')) %>% 
-  mutate(diff = value_x - value_nx,
-         propdiff = diff/value_nx)
+holiday_cm <- main_matrix %>% 
+  left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('','_winter_holiday')) %>% 
+  mutate(diff = value_winter_holiday - value,
+         propdiff = diff/value)
 
 #### PLOT ####
 max_value <- max(c(xmas_matrix$value,
-                   not_xmas_matrix$value))
+                   main_matrix$value))
 
-px <- xmas_matrix %>% 
+p_wh <- xmas_matrix %>% 
   ggplot() + 
   geom_tile(aes(x = part_age, y = cont_age, 
                 fill = value)) +
@@ -198,25 +202,25 @@ px <- xmas_matrix %>%
   labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
        title = 'Winter holidays') +
   theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
-  coord_fixed(); px
+  coord_fixed(); p_wh
 
-pnx <- not_xmas_matrix %>% 
+p_main <- main_matrix %>% 
   ggplot() + 
   geom_tile(aes(x = part_age, y = cont_age, 
                 fill = value)) +
   geom_label(aes(x = part_age, y = cont_age,
                  label = round(value, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
   labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
-       title = 'Not winter holidays') +
+       title = 'All contacts') +
   theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
-  coord_fixed(); pnx
+  coord_fixed(); p_main
 
 pdiff <- holiday_cm %>% 
   ggplot() + 
   geom_tile(aes(x = part_age, y = cont_age, 
                 fill = diff)) +
   geom_label(aes(x = part_age, y = cont_age,
-                 label = round(value_x - value_nx, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+                 label = round(diff, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
   labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
        title = 'Difference in mean contacts\n(positive = more in winter holidays)') +
   theme_lg() + scale_fill_gradient2(low = muted("blue"), mid = "white", 
@@ -228,7 +232,7 @@ pdiffprop <- holiday_cm %>%
   geom_tile(aes(x = part_age, y = cont_age, 
                 fill = propdiff)) +
   geom_label(aes(x = part_age, y = cont_age,
-                 label = paste0(100*round((value_x - value_nx)/value_nx, 2),'%')), 
+                 label = paste0(100*round(propdiff, 2),'%')), 
              col = 'black', fill = 'white', alpha = 0.5) + 
   labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
        title = 'Percentage difference in mean contacts\n(positive = more in winter holidays)') +
@@ -236,7 +240,7 @@ pdiffprop <- holiday_cm %>%
                                     high = muted("purple")) +
   coord_fixed(); pdiffprop
 
-pnx + px + 
+p_main + p_wh + 
   pdiff + pdiffprop + plot_layout(nrow = 2)
 ggsave(file.path('output','figures','exploration','holiday_contacts.png'),
        width = 16, height = 13)
