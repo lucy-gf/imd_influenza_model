@@ -100,7 +100,6 @@ names(delays) <- c('primary','secondary')
 #### RUNNING MCMC ####
 
 ## MCMC pars
-n_pop <- 1
 burn_in <- 0
 thinning_value <- 1
 n_samples <- 20
@@ -152,11 +151,10 @@ mcmc_parallel <- function(i){
                            subtype_init_pars,
                            rep(0, 4)),
     #   subtype-specific parameters x2, IMD spline parameters x4
-    n_samples = n_samples*n_pop,
-    nburn = burn_in*n_pop,
+    n_samples = n_samples,
+    nburn = burn_in,
     thinning = thinning_value,
     n_chains = 1,
-    n_pop = n_pop,
     txt_output = paste0(i)
   )
 }

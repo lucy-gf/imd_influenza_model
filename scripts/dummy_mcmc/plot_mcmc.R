@@ -203,8 +203,8 @@ read_and_get_samples <- function(i){
     samp
   }
   
-  # Code could have finished running the day before
-  dates <- as.character(c(run_date, run_date - 1))
+  # Code could have finished running in the days before
+  dates <- as.character(run_date - 0:4)
   
   # files in directory
   all_files <- list.files(path = gsub('/mcmc_samples.rds','',.args[8]))
@@ -223,20 +223,16 @@ read_and_get_samples <- function(i){
   chain_jobs <- suppressWarnings(unique(c(as.numeric(substr(date_files, 26, 26)),
                                           as.numeric(substr(date_files, 26, 27)))))
   chain_jobs <- chain_jobs[!is.na(chain_jobs)]
-  total_chains <- max(chain_jobs)
+  total_chains <- length(chain_jobs)
   
   samples_out <- data.table()
   
   for(chain_job in chain_jobs){
     
-    CHANGE_DATE <- !file.exists(gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain_job, '_', number_date_str,'.rds'),.args[8]))
-    if(CHANGE_DATE){
-      n_char <- nchar(number_date_str)
-      number_date_str_CJ <- paste0(substr(number_date_str, 1, n_char - 1),
-                                as.numeric(substr(number_date_str, n_char, n_char)) - 1)
-    }else{number_date_str_CJ <- number_date_str}
+    date_file <- date_files[grepl(paste0("CHAIN", chain_job, "_"), date_files)]
+    if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file, ')'))}
     
-    dat <- readRDS(gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain_job, '_', number_date_str_CJ,'.rds'),.args[8]))
+    dat <- readRDS(gsub('mcmc_samples.rds',date_file,.args[8]))
     list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
     samples_out_CJ <- rbindlist(list_samples)
     
@@ -305,9 +301,31 @@ admin_cols <- c('likelihood',
 colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
 
+#### FILTER #### 
+burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
+thinning_value <- 200 #as.numeric(strsplit(number_str, split = '_')[[1]][2])
+n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
+
+## print acceptance rates
+for(epid in unique(mcmc_samples$epidemic)){
+  filt <- mcmc_samples[epidemic == epid,]
+  accept_rate <- n_distinct(filt$likelihood)/nrow(filt)
+  filt_burned <- filt[iteration > 0.8*max(filt$iteration),]
+  accept_rate_burned <- n_distinct(filt_burned$likelihood)/nrow(filt_burned)
+  message('Epidemic: ', epid, '\nOverall acceptance rate: ', round(100*accept_rate, 1), 
+          '%\nAcceptance rate in last 20% of steps: ', round(100*accept_rate_burned, 1), '%')
+}
+
+# reduce whole chain by thinning value
+mcmc_samples_filtered <- mcmc_samples[iteration %% thinning_value == 0,]
+
 #### ADD Reff #### 
 message('Adding Reff')
-unique_df <- unique(mcmc_samples[, ..posterior_cols])
+unique_df <- unique(mcmc_samples_filtered[, ..posterior_cols])
+
+# only do every 100th unique row of mcmc_samples_filtered
+Reff_filter <- 100
+unique_df <- unique_df[Reff_filter*(1:(nrow(unique_df)/Reff_filter)),]
 
 pb <- txtProgressBar(min = 1, max = nrow(unique_df), style = 3)
 
@@ -331,13 +349,13 @@ for(i in 1:nrow(unique_df)){
                 beta_in = row$transmissibility_epid_2,
                 cm_in = cm)
   
-  mcmc_samples[transmissibility_epid_1 == row$transmissibility_epid_1 &
+  mcmc_samples_filtered[transmissibility_epid_1 == row$transmissibility_epid_1 &
                  children_susceptibility_epid_1 == row$children_susceptibility_epid_1 & 
                  adults_susceptibility_epid_1 == row$adults_susceptibility_epid_1 &
                  older_adults_susceptibility_epid_1 == row$older_adults_susceptibility_epid_1,
                Reff_epid_1 := R1]
   
-  mcmc_samples[transmissibility_epid_2 == row$transmissibility_epid_2 &
+  mcmc_samples_filtered[transmissibility_epid_2 == row$transmissibility_epid_2 &
                  children_susceptibility_epid_2 == row$children_susceptibility_epid_2 & 
                  adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
                  older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
@@ -352,50 +370,44 @@ close(pb)
 posterior_cols <- c(posterior_cols, 'Reff_epid_1', 'Reff_epid_2')
 plotting_cols <- unique(gsub('_epid_1|_epid_2', '', posterior_cols))
 
-#### FILTER #### 
-burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
-thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
-n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
-
-mcmc_samples_filtered <- mcmc_samples[iteration > burn_in & iteration %% thinning_value == 0,]
-mcmc_samples_filtered[, iteration := 1:n_samples, .(chain, epidemic)]
-
-#### PLOT DENSITY #### 
-message('Plotting densities')
-densities <- map(.x = plotting_cols, .f = plot_density)
-patchwork::wrap_plots(densities, nrow = 6)
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_densities'),.args[length(.args)]), width = 30, height = 14)
+## filter past burn-in
+mcmc_samples_filtered_burned <- mcmc_samples_filtered[iteration > burn_in,]
+# mcmc_samples_filtered_burned[, iteration := 1:n_samples, .(chain, epidemic)]
 
 #### PLOT TRACE #### 
-message('Plotting traces')
-traces <- map(.x = plotting_cols, .f = plot_trace)
-patchwork::wrap_plots(traces, nrow = 6) 
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_traces'),.args[length(.args)]), width = 30, height = 14)
+
+plot_trace(var="transmissibility")
+ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_trace'),.args[length(.args)]), width = 14, height = 7)
 
 message('Plotting filtered traces')
 traces_filtered <- map(.x = plotting_cols, .f = ~{plot_trace(var=.x, filtered=T)})
-patchwork::wrap_plots(traces_filtered, nrow = 6) 
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), width = 30, height = 14)
-
-plot_trace(var="transmissibility", filtered=T)
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_filtered_trace'),.args[length(.args)]), width = 10, height = 5)
+tf <- patchwork::wrap_plots(traces_filtered, nrow = 6) 
+ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), 
+       plot = tf,
+       width = 45, height = 22)
 
 message('Plotting log-likelihood')
-log_likelihood_plot <- plot_trace('likelihood'); log_likelihood_plot
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), width = 8, height = 10)
+log_likelihood_plot <- plot_trace('likelihood'); suppressWarnings(log_likelihood_plot)
+ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), 
+       width = 12, height = 16)
+
+#### PLOT DENSITY #### 
+# message('Plotting densities')
+# densities <- map(.x = plotting_cols, .f = plot_density)
+# patchwork::wrap_plots(densities, nrow = 6)
+# ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_densities'),.args[length(.args)]), width = 30, height = 14)
 
 ## PAIRWISE PLOTS
-
 message('Plotting pairwise correlations')
-mcmc_samples_filtered[, chain_it_id := paste0(chain, '_', iteration)]
+mcmc_samples_filtered_burned[, chain_it_id := paste0(chain, '_', iteration)]
 
 pairs_cols <- c(posterior_cols, 'epidemic', 'chain_it_id')
 
-pairs_data <- if(nrow(mcmc_samples_filtered) >= 10000){
+pairs_data <- if(nrow(mcmc_samples_filtered_burned) >= 10000){
   # only taking 1% of the mcmc_samples_filtered dataset as it takes too long otherwise!
-  mcmc_samples_filtered[seq(1, nrow(mcmc_samples_filtered), by = 100), ..pairs_cols]
+  mcmc_samples_filtered_burned[seq(1, nrow(mcmc_samples_filtered_burned), by = 100), ..pairs_cols]
 }else{
-  mcmc_samples_filtered[1:nrow(mcmc_samples_filtered), ..pairs_cols]
+  mcmc_samples_filtered_burned[1:nrow(mcmc_samples_filtered_burned), ..pairs_cols]
 }
 
 pairs_long <- melt(pairs_data, id.vars = c('epidemic', 'chain_it_id'))
@@ -427,7 +439,7 @@ ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_pairwi
 
 #### SAVE DATA ####
 
-write_rds(mcmc_samples_filtered, .args[length(.args)])
+write_rds(mcmc_samples_filtered_burned, .args[length(.args)])
 
 
 

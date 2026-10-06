@@ -119,6 +119,10 @@ reconnect$participants <- reconnect$participants %>%
   left_join(rc_holidays, by = 'part_id')
 
 reconnect$participants %>% filter(p_country == 'England') %>% 
+  group_by(part_age_group, p_broad_hols, p_termtime) %>% 
+  count()
+
+reconnect$participants %>% filter(p_country == 'England') %>% 
   group_by(part_age_group, c_contact_date, p_broad_hols, p_termtime) %>% 
   count() %>% 
   drop_na() %>% 
@@ -126,7 +130,8 @@ reconnect$participants %>% filter(p_country == 'England') %>%
   geom_bar(aes(x = c_contact_date, y = n, fill = p_termtime),
            stat = 'identity', position = 'stack', width = 1) +
   facet_grid(part_age_group ~ ., scales = 'free') +
-  theme_lg() + labs(x = '', fill = '')
+  scale_fill_manual(values = c('#FF8A5B','#EA526F','#25CED1')) +
+  theme_lg() + labs(x = '', fill = '', y = 'N participants')
 
 ## filter to England only
 reconnect$participants <- reconnect$participants %>% 
@@ -153,6 +158,25 @@ mean_contacts_hols %>%
   theme_lg() +
   ylim(c(0,NA))
 
+hols_analysis_stratified <- copy(reconnect$participants) %>% 
+  select(part_id, part_age_group, p_termtime) %>% 
+  left_join(reconnect$contacts %>% 
+              group_by(part_id) %>% count(), 
+            by = 'part_id') %>% filter(!is.na(p_termtime))
+hols_analysis_stratified$n <- na_to_0(hols_analysis_stratified$n)
+hols_analysis_stratified <- hols_analysis_stratified %>% select(!part_id)
+mean_contacts_hols_stratified <- hols_analysis_stratified[, lapply(.SD, neg_bin_fcn), by = c('part_age_group','p_termtime')]
+
+mean_contacts_hols_stratified %>% 
+  ggplot() +
+  geom_point(aes(x = part_age_group, y = n, col = p_termtime),
+                        size = 4, alpha = 0.5) + 
+  geom_point(aes(x = part_age_group, y = n, col = p_termtime),
+             size = 4, shape = 1, alpha = 1, stroke = 2) + 
+  theme_bw() + labs(x = '', col = '', y = 'Mean daily contacts') +
+  scale_color_manual(values = c('#FF8A5B','#EA526F','#25CED1')) +
+  ylim(c(0,NA))
+
 #### CONTACT MATRICES ####
 
 # filtered to IS_XMAS
@@ -170,16 +194,17 @@ reconnect_NOT_XMAS$contacts <- reconnect_NOT_XMAS$contacts %>%
   filter(part_id %in% reconnect_NOT_XMAS$participants$part_id)
 
 # calculated
+reciprocal_FLAG <- T
 xmas_matrix <- calc_matrix(reconnect_XMAS, 
-                           reciprocal = T,
+                           reciprocal = reciprocal_FLAG,
                            age_pop = broad_age_pop,
                            age_limits_in = broad_age_limits)
 not_xmas_matrix <- calc_matrix(reconnect_NOT_XMAS, 
-                               reciprocal = T,
+                               reciprocal = reciprocal_FLAG,
                                age_pop = broad_age_pop,
                                age_limits_in = broad_age_limits)
 main_matrix <- calc_matrix(reconnect, 
-                           reciprocal = T,
+                           reciprocal = reciprocal_FLAG,
                            age_pop = broad_age_pop,
                            age_limits_in = broad_age_limits)
 
@@ -187,7 +212,13 @@ main_matrix <- calc_matrix(reconnect,
 holiday_cm <- main_matrix %>% 
   left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('','_winter_holiday')) %>% 
   mutate(diff = value_winter_holiday - value,
-         propdiff = diff/value)
+         propdiff = diff/value) 
+
+holiday_cm %>% 
+  group_by(part_age) %>% 
+  summarise(sum_value = sum(value),
+            sum_value_winter_holiday = sum(value_winter_holiday)) %>% 
+  mutate(overall_propdiff = 100*(sum_value_winter_holiday - sum_value)/sum_value)
 
 #### PLOT ####
 max_value <- max(c(xmas_matrix$value,

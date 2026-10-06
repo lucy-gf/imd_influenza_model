@@ -152,14 +152,23 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 #### RUNNING MCMC ####
 
 ## MCMC pars
-n_pop <- 1
-burn_in <- 50000
-thinning_value <- 5
-n_samples <- 40000
+burn_in <- 50
+thinning_value <- 20
+n_samples <- 2000
+
+# save all steps, or only those after burn in and thinning?
+save_all_flag <- F
 
 # n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
 # if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
 # cat('\nn_cores: ', n_cores, '\n')
+
+# if in 2025/26, only using one set of epidemiological parameters (else using 2)
+initial_parameters_in <- if(i == 3){
+  c(subtype_init_pars,rep(0, 4))
+}else{
+  c(subtype_init_pars,subtype_init_pars,rep(0, 4))
+}
 
 mcmc_results <- run_mcmc_inference(
   demography_input = demography,
@@ -170,13 +179,13 @@ mcmc_results <- run_mcmc_inference(
   epid_periods = known_pars$epid_periods,
   coverage_rates = known_pars$proportion_observed,
   care_delays = delays,
-  initial_parameters = c(subtype_init_pars,subtype_init_pars,rep(0, 4)),
+  initial_parameters = initial_parameters_in,
   #   subtype-specific parameters x2, IMD spline parameters x4
-  n_samples = n_samples*n_pop,
-  nburn = burn_in*n_pop,
+  save_all = save_all_flag,
+  n_samples = n_samples,
+  nburn = burn_in,
   thinning = thinning_value,
   n_chains = 1,
-  n_pop = n_pop,
   txt_output = paste0(i, '_', chain)
 )
 
@@ -185,6 +194,7 @@ mcmc_results <- run_mcmc_inference(
 # save most recently run settings as a dummy save
 write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
                      HPC = T,
+                     save_all = save_all_flag,
                      date = Sys.Date()), .args[6])
 
 # save actual data

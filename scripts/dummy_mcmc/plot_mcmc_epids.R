@@ -210,15 +210,18 @@ par_name_df <- epid_pars %>%
 
 #### LOAD IN MCMC POSTERIOR DATA ####
 
-mcmc_samples_filtered <- data.table(readRDS(.args[8]))
+mcmc_samples_filtered_burned <- data.table(readRDS(.args[8]))
+n_samples <- nrow(mcmc_samples_filtered_burned)/nrow(mcmc_samples_filtered_burned %>% select(chain,epidemic) %>% unique())
+mcmc_samples_filtered_burned[, iteration := 1:n_samples, .(chain, epidemic)] # reset iterations
 
-admin_cols <- c('likelihood','chain','iteration','epidemic')
-posterior_cols <- colnames(mcmc_samples_filtered)[colnames(mcmc_samples_filtered) %notin% admin_cols]
+admin_cols <- c('likelihood','gp_likelihood','hospital_likelihood','subtype_likelihood',
+                'chain','iteration','epidemic')
+posterior_cols <- colnames(mcmc_samples_filtered_burned)[colnames(mcmc_samples_filtered_burned) %notin% admin_cols]
 
 ## only do for every tenth/hundredth/thousandth epidemic to save time
-mod_val <- if(nrow(mcmc_samples_filtered) > 100000){1000}else{
-  ifelse(nrow(mcmc_samples_filtered) > 10000,100,10)}
-mcmc_samples_f_f <- mcmc_samples_filtered[iteration %% mod_val == 0, ]
+mod_val <- if(nrow(mcmc_samples_filtered_burned) > 50000){1000}else{
+  ifelse(nrow(mcmc_samples_filtered_burned) > 10000,100,10)}
+mcmc_samples_f_f <- mcmc_samples_filtered_burned[iteration %% mod_val == 0, ]
 
 # make unique IDs across multiple seasons
 mcmc_samples_f_f[, chain_it_id := paste0(chain, '_', iteration)]

@@ -1,4 +1,5 @@
-## MCMC FUNCTIONS ##
+
+#### MCMC FUNCTIONS ####
 
 TEXT_SAVE_DIR <- file.path('mcmc_output')
 if(!dir.exists(TEXT_SAVE_DIR)){dir.create(TEXT_SAVE_DIR)}
@@ -14,11 +15,11 @@ run_mcmc_inference <- function(
     coverage_rates,
     care_delays,
     initial_parameters,
+    save_all = F,
     n_samples, 
     nburn, 
     thinning,
     n_chains,
-    n_pop = 1,
     n_cores = 1,
     txt_output = NULL
 ) {
@@ -31,13 +32,13 @@ run_mcmc_inference <- function(
   epidemic_dt <- as.data.table(epidemic_to_fit)
   coverage_rates$imd_quintile <- factor(coverage_rates$imd_quintile)
   n_subtypes <- n_distinct(subtype_season$subtype)
-  n_pars_per_subtype <- (length(initial_parameters) - 4)/2
+  n_pars_per_subtype <- (length(initial_parameters) - 4)/n_subtypes
   
-  # if n_pop < 3, DEzs sampler will require 3 chains
-  n_pop_internal <- max(n_pop, 3)
+  # DEzs sampler will require 3 chains
+  n_pop_internal <- 3
     
   ll_call_count <- 0
-  ll_total_calls <- (nburn + n_samples*thinning) / n_pop
+  ll_total_calls <- nburn + n_samples*thinning
   
   txt_out <- file.path('mcmc_output',paste0('index_',txt_output,'.txt'))
   
@@ -77,8 +78,8 @@ run_mcmc_inference <- function(
     care_rate_age_df_1[, c('broad_age.x','broad_age.y') := NULL]
     
     imd_spline_pars <- data.table(
-      primary = pars[1:2 + 2*n_pars_per_subtype],
-      secondary = pars[3:4 + 2*n_pars_per_subtype]
+      primary = pars[1:2 + n_subtypes*n_pars_per_subtype],
+      secondary = pars[3:4 + n_subtypes*n_pars_per_subtype]
     )
     rel_imd_rep_rates <- data.frame(imd_quintile = 1:5,
                                     rel_primary_rates = imd_spline(imd_spline_pars$primary),
@@ -172,6 +173,11 @@ run_mcmc_inference <- function(
       init_infected_vec <- (demography_input$population - pop_vaccinated)*get(paste0('init_infected_', k))/
         (sum(demography_input$population)-sum(pop_vaccinated))
       
+      run_A_shorter <- F
+      t_end_in <- if(run_A_shorter){
+        ifelse(epid_subtype == 'B', 300, 250)
+      }else{300}
+      
       time_series <- run_model(
         pop = demography_input$population,
         I0 = init_infected_vec,
@@ -182,8 +188,15 @@ run_mcmc_inference <- function(
         susc = get(paste0('susceptibility_vec_', k)),
         lat_per = epid_periods[1],
         inf_per = epid_periods[2],
-        t_end = ifelse(epid_subtype == 'B', 300, 250)
+        t_end = t_end_in
       )
+      
+      if(run_A_shorter & epid_subtype != 'B'){
+        add_time_series <- time_series[t %in% 1:50,]
+        add_time_series[, t := t + 250][, infections := 0]
+        time_series <- rbind(time_series, add_time_series)
+        setorder(time_series, 'age_grp','imd_quintile','risk_level','vaccinated')
+      }
       
       ## add start date (using first of september throughout)
       start_of_epidemic <- as.Date(paste0('01-09-',year(epidemic_dt$week_start[1])), format = '%d-%m-%Y')
@@ -304,10 +317,10 @@ run_mcmc_inference <- function(
     
     ## Shift observations by the care delays
     observed_data <- rbind(observed_data[setting=='primary_care'][,
-                                                                  observations := shift(observations, n = -delays['primary'], fill = 0),
+                                                                  observations := shift(observations, n = -care_delays['primary'], fill = 0),
                                                                   by = .(age_grp, imd_quintile, risk_level, index)],
                            observed_data[setting=='secondary_care'][,
-                                                                    observations := shift(observations, n = -delays['secondary'], fill = 0),
+                                                                    observations := shift(observations, n = -care_delays['secondary'], fill = 0),
                                                                     by = .(age_grp, imd_quintile, risk_level, index)])
     
     # Merge with observed data
@@ -408,39 +421,6 @@ run_mcmc_inference <- function(
       pars[4],
       age_labels
     )
-    susceptibility_vec_2 <- fcn_assign_ages(
-      pars[2 + n_pars_per_subtype],
-      pars[3 + n_pars_per_subtype],
-      pars[4 + n_pars_per_subtype],
-      age_labels
-    )
-    
-    reporting_vec <- c(6:n_pars_per_subtype, n_pars_per_subtype + 6:n_pars_per_subtype)
-    reporting_prim_vec <- c(6:11, n_pars_per_subtype + 6:11)
-    reporting_sec_vec <- reporting_vec[reporting_vec %notin% reporting_prim_vec]
-    
-    if(
-      
-      ## TRANSMISSIBILITY
-      pars[1] < min_trans || pars[1] > max_trans ||
-      pars[1 + n_pars_per_subtype] < min_trans || pars[1 + n_pars_per_subtype] > max_trans ||
-      
-      ## SUSCEPTIBILITY
-      sum(c(susceptibility_vec_1, susceptibility_vec_2) < min_susc) > 0 || sum(c(susceptibility_vec_1, susceptibility_vec_2) > max_susc) > 0 ||
-      
-      ## INITIAL INFECTED
-      pars[5] < min_log_init_inf || pars[5] > max_log_init_inf ||
-      pars[5 + n_pars_per_subtype] < min_log_init_inf || pars[5 + n_pars_per_subtype] > max_log_init_inf ||
-      
-      ## REPORTING
-      any(pars[reporting_vec] < min_reporting) || any(pars[reporting_vec] > max_reporting) ||
-      
-      ## IMD SPLINES
-      any(pars[1:4 + 2*n_pars_per_subtype] < min_spline) || any(pars[1:4 + 2*n_pars_per_subtype] > max_spline)
-      
-    ) {return(-Inf)}
-    
-    lprob <- 0
     
     R0_1 <- R0_func(susceptibility = susceptibility_vec_1,
                     inf_period = epid_periods[2],
@@ -448,15 +428,74 @@ run_mcmc_inference <- function(
                     cm_in = cm_input,
                     per_capita = T,
                     population_vector = demography_input$population)
+   
+    reporting_vec_1 <- c(6:n_pars_per_subtype)
+    reporting_prim_vec_1 <- c(6:11)
+    reporting_sec_vec_1 <- reporting_vec_1[reporting_vec_1 %notin% reporting_prim_vec_1]
     
-    R0_2 <- R0_func(susceptibility = susceptibility_vec_2,
-                    inf_period = epid_periods[2],
-                    beta_in = pars[1 + n_pars_per_subtype],
-                    cm_in = cm_input,
-                    per_capita = T,
-                    population_vector = demography_input$population)
+    if(
+      
+      ## TRANSMISSIBILITY
+      pars[1] < min_trans || pars[1] > max_trans ||
+      
+      ## SUSCEPTIBILITY
+      sum(susceptibility_vec_1 < min_susc) > 0 || sum(susceptibility_vec_1 > max_susc) > 0 ||
+      
+      ## INITIAL INFECTED
+      pars[5] < min_log_init_inf || pars[5] > max_log_init_inf ||
+      
+      ## REPORTING
+      any(pars[reporting_vec_1] < min_reporting) || any(pars[reporting_vec_1] > max_reporting) ||
+      
+      R0_1 < min_r0 || R0_1 > max_r0 
+      
+    ) {return(-Inf)}
     
-    if(sum(c(R0_1, R0_2) < min_r0) > 0 || sum(c(R0_1, R0_2) > max_r0) > 0) { return(-Inf) }
+    ## SECOND SUBTYPE
+    if(n_subtypes == 2){
+      
+      susceptibility_vec_2 <- fcn_assign_ages(
+        pars[2 + n_pars_per_subtype],
+        pars[3 + n_pars_per_subtype],
+        pars[4 + n_pars_per_subtype],
+        age_labels
+      )
+      
+      R0_2 <- R0_func(susceptibility = susceptibility_vec_2,
+                      inf_period = epid_periods[2],
+                      beta_in = pars[1 + n_pars_per_subtype],
+                      cm_in = cm_input,
+                      per_capita = T,
+                      population_vector = demography_input$population)
+      
+      reporting_vec_2 <- c(n_pars_per_subtype + 6:n_pars_per_subtype)
+      reporting_prim_vec_2 <- c(n_pars_per_subtype + 6:11)
+      reporting_sec_vec_2 <- reporting_vec_2[reporting_vec_2 %notin% reporting_prim_vec_2]
+      
+      if(
+        
+        ## TRANSMISSIBILITY
+        pars[1 + n_pars_per_subtype] < min_trans || pars[1 + n_pars_per_subtype] > max_trans ||
+        
+        ## SUSCEPTIBILITY
+        sum(susceptibility_vec_2 < min_susc) > 0 || sum(susceptibility_vec_2 > max_susc) > 0 ||
+        
+        ## INITIAL INFECTED
+        pars[5 + n_pars_per_subtype] < min_log_init_inf || pars[5 + n_pars_per_subtype] > max_log_init_inf ||
+        
+        ## REPORTING
+        any(pars[reporting_vec_2] < min_reporting) || any(pars[reporting_vec_2] > max_reporting) ||
+        
+        R0_2 < min_r0 || R0_2 > max_r0 
+        
+      ) {return(-Inf)}
+      
+    }
+    
+    ## IMD SPLINES
+    if(any(pars[1:4 + n_subtypes*n_pars_per_subtype] < min_spline) || any(pars[1:4 + n_subtypes*n_pars_per_subtype] > max_spline)){return(-Inf)}
+    
+    lprob <- 0
     
     # Scaled normal prior on R0 (pnorm(min_r0) is the log normalising constant)
     lprob <- lprob + dnorm(R0_1, mean = r0_mean, sd = r0_sd, log = TRUE) -
@@ -500,7 +539,7 @@ run_mcmc_inference <- function(
     }
     
     # Normal prior on spline parameters
-    lprob <- lprob + sum(dnorm(unname(pars[1:4 + 2*n_pars_per_subtype]), mean = imd_mean, sd = imd_sd, log = TRUE))
+    lprob <- lprob + sum(dnorm(unname(pars[1:4 + n_subtypes*n_pars_per_subtype]), mean = imd_mean, sd = imd_sd, log = TRUE))
     
     return(lprob)
   }
@@ -537,16 +576,16 @@ run_mcmc_inference <- function(
   # which would lead to huge ratios between IMD 1 and IMD 5 at the extremes
   
   ## set up sampler
-  lower_vals <- c(min_trans, rep(min_susc, 3), min_log_init_inf,
-                  rep(min_reporting, 12),
-                  min_trans, rep(min_susc, 3), min_log_init_inf,
-                  rep(min_reporting, 12),
-                  rep(min_spline, 4))
-  upper_vals <- c(max_trans, rep(max_susc, 3), max_log_init_inf,
-                  rep(max_reporting, 12),
-                  max_trans, rep(max_susc, 3), max_log_init_inf,
-                  rep(max_reporting, 12),
-                  rep(max_spline, 4))
+  lower_vals <- c(
+    rep(c(min_trans, rep(min_susc, 3), min_log_init_inf,
+          rep(min_reporting, 12)), n_subtypes),
+    rep(min_spline, 4)
+                  )
+  upper_vals <- c(
+    rep(c(max_trans, rep(max_susc, 3), max_log_init_inf,
+          rep(max_reporting, 12)), n_subtypes),
+    rep(max_spline, 4)
+    )
   }
   
   sampler <- function(n = 1){
@@ -557,12 +596,16 @@ run_mcmc_inference <- function(
       while(!valid){
         repeat {
           R0_1 <- rnorm(1, mean = r0_mean, sd = r0_sd)
-          R0_2 <- rnorm(1, mean = r0_mean, sd = r0_sd)
-          if (R0_1 >= min_r0 && R0_1 <= max_r0 && R0_2 >= min_r0 && R0_2 <= max_r0) break
+          if (R0_1 >= min_r0 && R0_1 <= max_r0) break
+        }
+        if(n_subtypes == 2){
+          repeat {
+            R0_2 <- rnorm(1, mean = r0_mean, sd = r0_sd)
+            if (R0_2 >= min_r0 && R0_2 <= max_r0) break
+          }
         }
         
         susc_1 <- rbeta(3, shape1_susc, shape2_susc)
-        susc_2 <- rbeta(3, shape1_susc, shape2_susc)
         
         trans_1 <- R0_func(
           susceptibility    = fcn_assign_ages(susc_1[1],
@@ -578,27 +621,44 @@ run_mcmc_inference <- function(
           return_beta       = TRUE
         )
         
-        trans_2 <- R0_func(
-          susceptibility    = fcn_assign_ages(susc_2[1],
-                                              susc_2[2],
-                                              susc_2[3],  
-                                              age_labels),
-          inf_period        = epid_periods[2],
-          beta_in           = 1,
-          cm_in             = cm_input,
-          per_capita        = TRUE,
-          population_vector = demography_input$population,
-          R0assumed         = R0_2,
-          return_beta       = TRUE
-        )
+        if(n_subtypes == 2){
+          
+          susc_2 <- rbeta(3, shape1_susc, shape2_susc)
+          
+          trans_2 <- R0_func(
+            susceptibility    = fcn_assign_ages(susc_2[1],
+                                                susc_2[2],
+                                                susc_2[3],  
+                                                age_labels),
+            inf_period        = epid_periods[2],
+            beta_in           = 1,
+            cm_in             = cm_input,
+            per_capita        = TRUE,
+            population_vector = demography_input$population,
+            R0assumed         = R0_2,
+            return_beta       = TRUE
+          )
+        }
         
-        if(trans_1 >= min_trans & trans_1 <= max_trans & 
-           trans_2 >= min_trans & trans_2 <= max_trans) valid <- TRUE
+        if(n_subtypes == 2){
+         
+          if(trans_1 >= min_trans & trans_1 <= max_trans & 
+             trans_2 >= min_trans & trans_2 <= max_trans) valid <- TRUE
+          
+        }else{
+          
+          if(trans_1 >= min_trans & trans_1 <= max_trans) valid <- TRUE
+          
+        }
+        
       }
       
       # Check trans is within bounds
-      if(trans_1 < min_trans | trans_1 > max_trans |
-         trans_2 < min_trans | trans_2 > max_trans ) next
+      if(trans_1 < min_trans | trans_1 > max_trans) next
+      
+      if(n_subtypes == 2){
+        if(trans_2 < min_trans | trans_2 > max_trans) next
+      }
       
       ## IMD splines normal around 0, SD = 0.5
       imd_spline_samples <- rnorm(4, mean = imd_mean, sd = imd_sd) 
@@ -610,10 +670,15 @@ run_mcmc_inference <- function(
       # Draw reporting rates from Beta priors
       prim_rates_1 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
       sec_rates_1  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
-      prim_rates_2 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
-      sec_rates_2  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
       
-      out[j, ] <- c(
+      if(n_subtypes == 2){
+        prim_rates_2 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
+        sec_rates_2  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+      }
+      
+      out[j, ] <- if(n_subtypes == 2){
+        
+        c(
         trans_1, susc_1,
         runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
         prim_rates_1,                                     # primary care rates
@@ -623,7 +688,18 @@ run_mcmc_inference <- function(
         prim_rates_2,                                     # primary care rates
         sec_rates_2,                                      # secondary care rates
         imd_spline_samples       # IMD spline, normal around 0
-      )
+        )
+        }else{
+          
+          c(
+            trans_1, susc_1,
+            runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
+            prim_rates_1,                                     # primary care rates
+            sec_rates_1,                                  # secondary care rates
+            imd_spline_samples       # IMD spline, normal around 0
+          )
+          
+      }
       break
       }
     }
@@ -643,7 +719,7 @@ run_mcmc_inference <- function(
   )
   
   settings <- list(
-    iterations = (nburn + n_samples*thinning) * n_pop_internal / n_pop,
+    iterations = (nburn + n_samples*thinning) * n_pop_internal,
     burnin = 0,
     thin = 1,
     message = F,
@@ -652,6 +728,8 @@ run_mcmc_inference <- function(
   )
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
+  
+  samp <- getSample(out, start = nburn + 1, thin = thinning, coda = TRUE)
   
   nPar <- out$setup$numPars
   
@@ -671,9 +749,23 @@ run_mcmc_inference <- function(
     lookupComponents(out$chain, LLcache, nPar)
   }
   
-  out$LLcomponents <- LLcomponents
+  for(sample in 1:length(samp)){
+    
+    samp[[sample]] <- cbind(samp[[sample]], 
+                            LLcomponents[[sample]][nburn + thinning*(1:n_samples), c('LP','LL','LPr','LL1','LL2','LL3')])
+    
+  }
   
-  return(out)
+  if(save_all){
+    
+    return(out)
+    
+  }else{
+    
+    return(samp)
+    
+  }
+  
 }
 
 
@@ -681,7 +773,7 @@ run_mcmc_inference <- function(
 
 plot_density <- function(var, filtered = T){
   
-  data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples}
+  data <- if(filtered){mcmc_samples_filtered_burned}else{mcmc_samples_filtered}
   
   if(var != 'likelihood'){
     data <- data %>% select(!likelihood)
@@ -690,7 +782,7 @@ plot_density <- function(var, filtered = T){
   var_label <- gsub('_rate_','_rate\n', var)
   var_label <- gsub('_spline_','_spline\n', var_label)
   
-  var_label <- if(var=='Reff'){'Reff (calculated after)'}else{
+  var_label <- if(var=='Reff'){'\nReff (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var_label}
   }
   
@@ -752,7 +844,7 @@ plot_density <- function(var, filtered = T){
 
 plot_trace <- function(var, filtered = F){
   
-  data <- if(filtered){mcmc_samples_filtered}else{mcmc_samples} 
+  data <- if(filtered){mcmc_samples_filtered_burned}else{mcmc_samples_filtered} 
   
   if(var != 'likelihood'){
     data <- data %>% select(!likelihood)
@@ -761,7 +853,7 @@ plot_trace <- function(var, filtered = F){
   var_label <- gsub('_rate_','_rate\n', var)
   var_label <- gsub('_spline_','_spline\n', var_label)
   
-  var_label <- if(var=='Reff'){'Reff (calculated after)'}else{
+  var_label <- if(var=='Reff'){'\nReff (calculated after)'}else{
     if(var=='init_infected'){'Initial infected (log10)'}else{var_label}
   }
   if(var=='likelihood'){var_label <- 'Log-likelihood'}
@@ -779,7 +871,7 @@ plot_trace <- function(var, filtered = F){
       
     p <- data %>%
       select(iteration, epidemic, chain, job, !!!syms(var_column)) %>% 
-      pivot_longer(!c(iteration,epidemic,chain, job)) %>%
+      pivot_longer(!c(iteration,epidemic,chain, job)) %>% drop_na() %>% 
       mutate(epidemic_of_season = as.numeric(substr(name, nchar(name), nchar(name))),
              name = substr(name, 1, nchar(name) - 7)) %>% 
       left_join(epid_pars_joining, by = c('epidemic','epidemic_of_season','name')) %>% 
@@ -840,15 +932,16 @@ plot_trace <- function(var, filtered = F){
         filter(value != -Inf) %>% 
         mutate(name = gsub('_',' ', name)) %>% 
         ggplot() +
-        geom_bar(aes(iteration/1000, y = value, fill = name),
-                 position = 'fill', stat = 'identity', width = 1/1000) +
+        geom_bar(aes(iteration/1000, y = value, fill = name, alpha = -value),
+                 position = 'fill', stat = 'identity', width = 0.5) +
         scale_fill_manual(values = c('#57A773','#157145','#9BD1E5')) +
         facet_grid(.~season, scales = 'free') +
         theme_minimal() + labs(y = 'Proportion of log-likelihood', fill = '') + 
         scale_x_continuous(expand = expansion(c(0,0))) + 
         scale_y_continuous(expand = expansion(c(0,0))) + 
+        scale_alpha_manual(limits = c(0,1)) +
         theme(legend.position = 'bottom') +
-        labs(x = 'Iteration (1000s)'); p2
+        labs(x = 'Iteration (1000s)'); suppressWarnings(print(p2))
       
     }else{
       
@@ -897,7 +990,7 @@ plot_trace <- function(var, filtered = F){
       geom_line(aes(x = iteration/1000, y = value, col = as.factor(job), group = chain),
                 alpha = 0.4)
     
-    p + p_filt + p2 + plot_layout(nrow = 3)
+    p + p_filt + suppressWarnings(print(p2)) + plot_layout(nrow = 3)
     
   }else{
     
