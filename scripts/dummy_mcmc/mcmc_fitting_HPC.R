@@ -152,9 +152,14 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 #### RUNNING MCMC ####
 
 ## MCMC pars
-burn_in <- 50
-thinning_value <- 20
-n_samples <- 2000
+burn_in <- 0
+thinning_value <- 100
+n_samples <- 2500
+
+number_string <- paste0(burn_in,'_',thinning_value,'_',n_samples)
+
+cat('\n Total steps: ', burn_in + thinning_value*n_samples, ' (', 
+    number_string, ')\n', sep = '')
 
 # save all steps, or only those after burn in and thinning?
 save_all_flag <- F
@@ -192,7 +197,7 @@ mcmc_results <- run_mcmc_inference(
 #### SAVE ####
 
 # save most recently run settings as a dummy save
-write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
+write_rds(data.table(x=number_string,
                      HPC = T,
                      save_all = save_all_flag,
                      date = Sys.Date()), .args[6])
@@ -200,6 +205,6 @@ write_rds(data.table(x=paste0(burn_in,'_',thinning_value,'_',n_samples),
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',
                                            thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
-                             .args[6]))
+                             gsub('data/',paste0('data/',number_string),.args[6])))
 
 

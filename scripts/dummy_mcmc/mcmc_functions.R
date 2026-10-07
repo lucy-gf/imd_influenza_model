@@ -932,14 +932,16 @@ plot_trace <- function(var, filtered = F){
         filter(value != -Inf) %>% 
         mutate(name = gsub('_',' ', name)) %>% 
         ggplot() +
-        geom_bar(aes(iteration/1000, y = value, fill = name, alpha = -value),
+        geom_bar(aes(iteration/1000, y = value, fill = name),
                  position = 'fill', stat = 'identity', width = 0.5) +
-        scale_fill_manual(values = c('#57A773','#157145','#9BD1E5')) +
+        # geom_line(aes(iteration/1000, y = -value/min(value), 
+                      # group = name, lty = name)) +
+        scale_fill_manual(values = c('#157145','#57A773','#9BD1E5')) +
         facet_grid(.~season, scales = 'free') +
         theme_minimal() + labs(y = 'Proportion of log-likelihood', fill = '') + 
         scale_x_continuous(expand = expansion(c(0,0))) + 
         scale_y_continuous(expand = expansion(c(0,0))) + 
-        scale_alpha_manual(limits = c(0,1)) +
+        # scale_linetype_manual(values = c(2,3,1)) + 
         theme(legend.position = 'bottom') +
         labs(x = 'Iteration (1000s)'); suppressWarnings(print(p2))
       

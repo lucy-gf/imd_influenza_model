@@ -338,13 +338,13 @@ primary_names <- paste0('primary_imd_', 1:5)
 secondary_names <- paste0('secondary_imd_', 1:5)
 
 ## apply imd_spline function
-rep_rates <- mcmc_samples_f_f %>% 
-  bind_cols(pmap(list(mcmc_samples_f_f$imd_spline_primary_1, mcmc_samples_f_f$imd_spline_primary_2),
+rep_rates <- mcmc_samples_filtered_burned %>% 
+  bind_cols(pmap(list(mcmc_samples_filtered_burned$imd_spline_primary_1, mcmc_samples_filtered_burned$imd_spline_primary_2),
                  function(x, y) {
                    result <- imd_spline(c(x, y))
                    setNames(as.list(result), primary_names)
                  }) %>% bind_rows()) %>% 
-  bind_cols(pmap(list(mcmc_samples_f_f$imd_spline_secondary_1, mcmc_samples_f_f$imd_spline_secondary_2),
+  bind_cols(pmap(list(mcmc_samples_filtered_burned$imd_spline_secondary_1, mcmc_samples_filtered_burned$imd_spline_secondary_2),
                  function(x, y) {
                    result <- imd_spline(c(x, y))
                    setNames(as.list(result), secondary_names)

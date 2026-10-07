@@ -203,11 +203,30 @@ read_and_get_samples <- function(i){
     samp
   }
   
+  extract_data <- function(k){
+    
+    samp <- data.table(dat[[k]])
+    
+    # if in 2025/26, add blank parameters
+    if(ncol(samp) == 27){
+      samp <- cbind(samp[, 1:17], 
+                    matrix(0, ncol = 17, nrow = nrow(samp)),
+                    samp[, 18:27])
+      colnames(samp) <- c(paste0('par ', 1:38), colnames(samp)[39:44])
+    }
+    
+    samp[, job := chain_job]
+    samp[, chain := k + length(dat)*(chain_job - 1)]
+    samp[, iteration := 1:nrow(samp)]
+    samp
+    
+  }
+  
   # Code could have finished running in the days before
   dates <- as.character(run_date - 0:4)
   
   # files in directory
-  all_files <- list.files(path = gsub('/mcmc_samples.rds','',.args[8]))
+  all_files <- list.files(path = gsub('mcmc_samples.rds',number_str,.args[8]))
   
   # files finishing on relevant dates
   date_files <- c()
@@ -232,8 +251,21 @@ read_and_get_samples <- function(i){
     date_file <- date_files[grepl(paste0("CHAIN", chain_job, "_"), date_files)]
     if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file, ')'))}
     
-    dat <- readRDS(gsub('mcmc_samples.rds',date_file,.args[8]))
-    list_samples <- mclapply(1:length(dat$chain), get_samples_parallel)
+    dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str,'/',date_file),.args[8]))),
+                    error = NA)
+    
+    if(length(dat) == 1){
+      if(is.na(dat)){
+        dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str,'/',date_file),.args[8]))))
+      }
+    }
+    
+    list_samples <- if(save_all_flag){
+      mclapply(1:length(dat), get_samples_parallel)
+    }else{
+        mclapply(1:length(dat), extract_data)
+      }
+    
     samples_out_CJ <- rbindlist(list_samples)
     
     samples_out <- rbind(samples_out, 
@@ -250,8 +282,10 @@ read_and_get_samples <- function(i){
 output_details_file <- readRDS(.args[8])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
+save_all_flag <- output_details_file$save_all
 message('\n------------\nDate run: ',as.character(run_date),'\n------------',sep='')
 message('\n------------\nSettings: ',number_str,'\n------------\n',sep='')
+message('\n------------\nSaved: ',ifelse(save_all_flag,'all','minimal'),'\n------------\n',sep='')
 number_date_str <- paste0(number_str, '_', run_date)
 
 # was it run on the HPC? The files saved differently
@@ -259,7 +293,11 @@ WAS_HPC <- output_details_file$HPC
 
 if(WAS_HPC){
   
-  mcmc_samples <- rbindlist(lapply(1:3, read_and_get_samples))
+  m1 <- read_and_get_samples(1)
+  m2 <- read_and_get_samples(2)
+  m3 <- read_and_get_samples(3)
+  
+  mcmc_samples <- rbind(m1, m2, m3)
   mcmc_samples[, c('LP','LPr') := NULL]
   
 }else{
@@ -303,8 +341,8 @@ colnames(mcmc_samples) <- c(posterior_cols,
 
 #### FILTER #### 
 burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
-thinning_value <- 200 #as.numeric(strsplit(number_str, split = '_')[[1]][2])
-n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
+thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
+n_samples <- as.numeric(strsplit(number_str, split = '_')[[1]][3]) #(max(mcmc_samples$iteration) - burn_in)/thinning_value
 
 ## print acceptance rates
 for(epid in unique(mcmc_samples$epidemic)){
@@ -316,16 +354,22 @@ for(epid in unique(mcmc_samples$epidemic)){
           '%\nAcceptance rate in last 20% of steps: ', round(100*accept_rate_burned, 1), '%')
 }
 
-# reduce whole chain by thinning value
-mcmc_samples_filtered <- mcmc_samples[iteration %% thinning_value == 0,]
+mcmc_samples_filtered <- if(save_all_flag){
+  # reduce whole chain by thinning value
+  mcmc_samples[iteration %% thinning_value == 0,] 
+}else{
+  copy(mcmc_samples)[, iteration := burn_in + iteration*thinning_value]
+}
 
 #### ADD Reff #### 
 message('Adding Reff')
 unique_df <- unique(mcmc_samples_filtered[, ..posterior_cols])
 
-# only do every 100th unique row of mcmc_samples_filtered
-Reff_filter <- 100
-unique_df <- unique_df[Reff_filter*(1:(nrow(unique_df)/Reff_filter)),]
+# if(save_all_flag){
+  # only do every 100th unique row of mcmc_samples_filtered
+  Reff_filter <- 100
+  unique_df <- unique_df[Reff_filter*(1:(nrow(unique_df)/Reff_filter)),]
+# }
 
 pb <- txtProgressBar(min = 1, max = nrow(unique_df), style = 3)
 
@@ -370,9 +414,12 @@ close(pb)
 posterior_cols <- c(posterior_cols, 'Reff_epid_1', 'Reff_epid_2')
 plotting_cols <- unique(gsub('_epid_1|_epid_2', '', posterior_cols))
 
-## filter past burn-in
-mcmc_samples_filtered_burned <- mcmc_samples_filtered[iteration > burn_in,]
-# mcmc_samples_filtered_burned[, iteration := 1:n_samples, .(chain, epidemic)]
+mcmc_samples_filtered_burned <- if(save_all_flag){
+  ## filter past burn-in
+  mcmc_samples_filtered[iteration > burn_in,]#[, iteration := 1:n_samples, .(chain, epidemic)]
+}else{
+  copy(mcmc_samples_filtered)
+}
 
 #### PLOT TRACE #### 
 
