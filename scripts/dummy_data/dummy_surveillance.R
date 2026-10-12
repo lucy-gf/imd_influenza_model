@@ -29,8 +29,7 @@ infections <- readRDS(.args[1])
 known_pars <- readRDS(.args[2])
 years <- known_pars$years
 
-risk_group_pop <- known_pars$risk_group_pop
-vaccinated_pop <- known_pars$vaccinated_pop
+vaccinated_data <- known_pars$vaccinated_data
 
 opensafely_coverage <- known_pars$proportion_observed
 
@@ -43,19 +42,71 @@ full_df <- data.frame()
 
 for(k in 1:length(infections)){
   
-  if(k==1){cat('Year: ')}
+  if(k==1){cat('Subtype-season: ')}
   
-  year_i <- names(infections)[k]
+  SS_i <- names(infections)[k]
+  year_i <- as.numeric(substr(SS_i, 1, 4))
+  subtype_i <- gsub(year_i, '', gsub(' |\\(|\\)', '', SS_i))
   
-  cat(year_i, ', ', sep = '')
+  cat(SS_i, ', ', sep = '')
   
   ## merge with coverage rates and attendance rates
   infections_df <- infections[[k]] %>% 
-    mutate(imd_quintile = as.numeric(imd_quintile)) %>% 
-    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile', 'risk_level')) %>% 
+    mutate(imd_quintile = as.numeric(imd_quintile),
+           year = year(start_date)) %>% 
+    left_join(known_pars$vaccinated_data %>% 
+                filter(start_of_season == year_i, subtype == subtype_i) %>% 
+                select(age_grp, imd_quintile, risk_level, VE_INF, VE_HOSP),
+              by = c('age_grp','imd_quintile','risk_level')) %>% 
+    left_join(unknown_pars$care_rates, by = c('age_grp','imd_quintile','risk_level','subtype','year')) %>% 
     left_join(opensafely_coverage, by = c('age_grp','imd_quintile','risk_level')) %>% 
     mutate(observed_infections = round(OS_COVERAGE*infections)) 
   ## round to nearest integer, when considering only infections in OpenSAFELY population
+  
+  #### SAMPLE SECONDARY CARE ####
+  # (doing first as then can aggregate by vacc status for primary care sampling)
+  
+  # scale hosp_rate by (1 - VE_HOSP)(1 - VE_INF) for VE against hospitalisation
+  infections_df <- infections_df %>% 
+    mutate(
+      ve_hosp_multiplier = case_when(
+        !vaccinated ~ 1,
+        vaccinated ~ (1 - VE_HOSP)/(1 - VE_INF)
+      ),
+      # if VE_HOSP < VE_INF, assume no protection against hospitalisation
+      ve_hosp_multiplier = case_when(
+        ve_hosp_multiplier > 1 ~ 1,
+        T ~ ve_hosp_multiplier
+      ),
+      hosp_rate = case_when(
+        !vaccinated ~ hosp_rate,
+        vaccinated ~ ve_hosp_multiplier*hosp_rate
+      )
+    ) 
+  # cat('VE HOSP MULTIPLIERS:', round(unique(infections_df$ve_hosp_multiplier), 3),'\n')
+  
+  secondary_care <- c()
+  for(i in 1:nrow(infections_df)){
+    if(infections_df$observed_infections[i] < 1){
+      secondary_care <- c(secondary_care, 0)
+    }else{
+      prob_i <- (infections_df$hosp_rate[i])
+      if(prob_i <= 0){prob_i <- 1e-10}
+      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
+                      prob = prob_i)
+      secondary_care <- c(secondary_care, sec_i)
+    }
+  }
+  
+  infections_df$secondary_care <- secondary_care
+  
+  ## aggregate over vaccination status 
+  infections_df <- infections_df %>% 
+    summarise(.by = c(t, age_grp, imd_quintile, risk_level, pop, start_date, 
+                      gp_rate, OS_COVERAGE),
+              infections = sum(infections),
+              observed_infections = sum(observed_infections),
+              secondary_care = sum(secondary_care))
   
   #### SAMPLE PRIMARY CARE ####
   
@@ -73,23 +124,6 @@ for(k in 1:length(infections)){
   }
   
   infections_df$primary_care <- primary_care
-  
-  #### SAMPLE SECONDARY CARE ####
-  
-  secondary_care <- c()
-  for(i in 1:nrow(infections_df)){
-    if(infections_df$observed_infections[i] < 1){
-      secondary_care <- c(secondary_care, 0)
-    }else{
-      prob_i <- (infections_df$hosp_rate[i])
-      if(prob_i <= 0){prob_i <- 1e-10}
-      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
-                      prob = prob_i)
-      secondary_care <- c(secondary_care, sec_i)
-    }
-  }
-  
-  infections_df$secondary_care <- secondary_care
   
   #### MAKE INTO TIME SERIES ####
   
@@ -109,19 +143,22 @@ for(k in 1:length(infections)){
   
   infections_filtered <- infections_df %>% 
     select(!!!syms(key_vars), infections, observed_infections, primary_care, secondary_care) %>% 
-    mutate(index = k)
+    mutate(season = paste0(year_i, '-', year_i + 1))
   
   full_df <- rbind(full_df,
                    infections_filtered)
   
 }
 
+season_df <- full_df %>% ungroup() %>% select(season) %>% unique() %>% mutate(index = 1:n())
+
 full_df_agg <- full_df %>% 
-  group_by(!!!syms(key_vars), index) %>% 
+  group_by(!!!syms(key_vars), season) %>% 
   summarise(infections = sum(infections),
             observed_infections = sum(observed_infections),
             primary_care = sum(primary_care), 
-            secondary_care = sum(secondary_care))
+            secondary_care = sum(secondary_care)) %>% ungroup() %>% 
+  left_join(season_df, by = 'season')
 
 full_df_agg %>% mutate(date = last_monday(date)) %>% 
   group_by(date, imd_quintile) %>%
@@ -135,13 +172,12 @@ full_df_agg %>% mutate(date = last_monday(date)) %>%
   theme_bw() + labs(color='IMD') + facet_grid(name ~ imd_quintile, scales = 'free') + 
   scale_color_manual(values = imd_quintile_colors) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y"))
-ggsave(gsub('data','output/figures',gsub('.rds','.png',gsub('dummy_data','dummy_infections',.args[4]))), width = 16, height = 8)
 
 ## print outcomes
 
 cat('Outcomes per season:\n')
 
-full_df_agg %>% group_by(index) %>%
+full_df_agg %>% group_by(season) %>%
   summarise(infections = sum(infections),
             observed_infections = sum(observed_infections),
             proportion_observed = paste0(round(100*sum(observed_infections)/sum(infections), 2), '%'),
@@ -150,13 +186,26 @@ full_df_agg %>% group_by(index) %>%
 
 #### SAVE DATA ####
 
-# actual surveillance data won't include infections, 
-# and will only be weekly
-surveillance_data <- full_df_agg %>% 
-  group_by(age_grp, imd_quintile, risk_level) %>% 
-  complete(date = seq.Date(from = as.Date(paste0('01-01-',year(full_df_agg$date[1])), format = '%d-%m-%Y') + 7,
-                           to = max(full_df_agg$date), by = 1),
-           fill = list(index = 1, infections = 0, primary_care = 0, secondary_care = 0)) %>% 
+# actual surveillance data won't include infections, and will only be weekly
+extra_dates <- rbind(
+  data.frame(
+    date = seq.Date(from = as.Date(paste0('01-01-',years[1]), format = '%d-%m-%Y') + 7,
+            to = max(full_df_agg[full_df_agg$index == 1,]$date), by = 1), index = 1),
+  data.frame(
+    date = seq.Date(from = max(full_df_agg[full_df_agg$index == 1,]$date) + 7,
+             to = max(full_df_agg[full_df_agg$index == 2,]$date), by = 1), index = 2),
+  data.frame(
+    date = seq.Date(from = max(full_df_agg[full_df_agg$index == 2,]$date) + 7,
+             to = max(full_df_agg[full_df_agg$index == 3,]$date), by = 1), index = 3))
+
+surveillance_data <- cross_join(extra_dates, full_df_agg %>% 
+                                  select(age_grp, imd_quintile, risk_level) %>% 
+                                  unique()) %>% 
+  left_join(full_df_agg %>% 
+              select(age_grp, imd_quintile, risk_level, date, index, primary_care, secondary_care),
+            by = c('index', 'date', 'age_grp', 'imd_quintile', 'risk_level')) %>% 
+  mutate(primary_care = case_when(is.na(primary_care) ~ 0, T ~ primary_care),
+         secondary_care = case_when(is.na(secondary_care) ~ 0, T ~ secondary_care)) %>% 
   mutate(week_start = last_monday(date)) %>% 
   group_by(week_start, age_grp, imd_quintile, index, risk_level) %>% 
   summarise(primary_care = sum(primary_care),
@@ -170,31 +219,83 @@ surveillance_data %>%
   scale_color_manual(values = imd_quintile_colors)
 
 sd_plot <- surveillance_data %>% 
-  left_join(vaccinated_pop %>% select(age_grp, imd_quintile, risk_level, pop),
-            by = c('age_grp','imd_quintile','risk_level')) %>% 
+  left_join(vaccinated_data %>% select(start_of_season, age_grp, imd_quintile, risk_level, pop) %>% 
+              rename(index = start_of_season) %>% mutate(index = index - years[1] + 1) %>% unique(),
+            by = c('age_grp','imd_quintile','risk_level','index')) %>% 
   left_join(opensafely_coverage,
             by = c('age_grp','imd_quintile','risk_level')) %>% 
   mutate(pop = pop*OS_COVERAGE) %>% select(!OS_COVERAGE) %>% 
-  filter(index == 3) %>% 
-  mutate(age_grp = case_when(
+  mutate(age_grp = case_when( ## aggregate adult cases
     age_grp %in% c('18-25','26-34','35-49','50-69') ~ '18-69',
     T ~ age_grp)) %>% 
   group_by(week_start, age_grp, imd_quintile) %>% 
-  summarise(secondary_care = sum(secondary_care), 
+  summarise(primary_care = sum(primary_care),
+            secondary_care = sum(secondary_care), 
             pop = sum(pop)) %>% 
-  mutate(secondary_care = 100000*secondary_care/pop)
+  mutate(primary_care = 100000*primary_care/pop,
+         secondary_care = 100000*secondary_care/pop)
 
 sd_plot$age_grp <- factor(sd_plot$age_grp,
                           levels = c('0-4','5-11','12-17','18-69','70-79','80+'))
+
+sd_plot %>% 
+  ggplot() +
+  geom_line(aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
+  geom_point(data = sd_plot %>% filter(primary_care > 0),
+             aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile),
+             alpha = 0.3) +
+  geom_point(data = sd_plot %>% filter(primary_care > 0),
+             aes(week_start, primary_care, col = as.factor(imd_quintile), group = imd_quintile),
+             alpha = 1, shape = 1) +
+  theme_bw() + labs(color='IMD') + facet_wrap(. ~ age_grp, scales = 'free') +
+  scale_color_manual(values = imd_quintile_colors) +
+  labs(y = 'Primary care attendance per 100,000', x='')
+ggsave(file.path('output/figures/dummy_infections/dummy_primary_care.png'), width = 16, height = 8)
+
 sd_plot %>% 
   ggplot() +
   geom_line(aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile)) +
   geom_point(data = sd_plot %>% filter(secondary_care > 0),
              aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),
-             alpha = 1) +
+             alpha = 0.3) +
+  geom_point(data = sd_plot %>% filter(secondary_care > 0),
+             aes(week_start, secondary_care, col = as.factor(imd_quintile), group = imd_quintile),
+             alpha = 1, shape = 1) +
   theme_bw() + labs(color='IMD') + facet_wrap(. ~ age_grp, scales = 'free') +
   scale_color_manual(values = imd_quintile_colors) +
   labs(y = 'Hospital attendance per 100,000', x='')
+ggsave(file.path('output/figures/dummy_infections/dummy_secondary_care.png'), width = 16, height = 8)
+
+base3 <- sd_plot %>% filter(imd_quintile == 3) %>% mutate(prim_base = primary_care/pop,
+                                                          sec_base = secondary_care/pop) %>% 
+  select(week_start, age_grp, prim_base, sec_base)
+
+sd_plot %>% 
+  left_join(base3, by = c('week_start', 'age_grp')) %>% 
+  mutate(prim_ratio = (primary_care/pop)/prim_base,
+         sec_ratio = (secondary_care/pop)/sec_base,
+         yr1 = year(week_start - 7*26),
+         season = paste0(yr1, '-', yr1 + 1)) %>% 
+  filter(imd_quintile != 3) %>% ungroup() %>% 
+  select(season, age_grp, imd_quintile, prim_ratio, sec_ratio) %>% 
+  pivot_longer(!c(season, age_grp, imd_quintile)) %>% drop_na() %>% filter(value != Inf) %>% 
+  summarise(m = median(value),
+            l = quantile(value, 0.25),
+            u = quantile(value, 0.95), 
+            .by = c(season, age_grp, imd_quintile, name)) %>% 
+  ggplot() +
+  geom_hline(yintercept = 1, lty = 2, alpha = 0.4) +
+  geom_point(aes(season, m, col = as.factor(imd_quintile), shape = name, 
+                 group = interaction(season, imd_quintile, name)),
+             position = position_dodge(width = 0.6), size = 3) +
+  geom_errorbar(aes(season, ymin=l, ymax=u, col = as.factor(imd_quintile), 
+                 group = interaction(season, imd_quintile, name)),
+             position = position_dodge(width = 0.6)) +
+  theme_bw() + facet_wrap(. ~ age_grp, scales = 'free') +
+  ylim(c(0,NA)) +
+  scale_color_manual(values = imd_quintile_colors) +
+  labs(y = 'Relative healthcare attendance rates', x='', col = 'IMD')
+ggsave(file.path('output/figures/dummy_infections/healthcare_ratios.png'), width = 16, height = 8)
 
 write_rds(surveillance_data, .args[4])
 
