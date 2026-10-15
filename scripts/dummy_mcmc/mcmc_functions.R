@@ -39,6 +39,7 @@ run_mcmc_inference <- function(
     
   ll_call_count <- 0
   ll_total_calls <- nburn + n_samples*thinning
+  mod_val <- if (ll_total_calls < 100) 10 else if (ll_total_calls < 2000) 100 else 1000
   
   txt_out <- file.path('mcmc_output',paste0('index_',txt_output,'.txt'))
   
@@ -383,15 +384,17 @@ run_mcmc_inference <- function(
     
     if (ll_call_count == 0) { ll_start_time <<- Sys.time() }
     ll_call_count <<- ll_call_count + 1
-    mod_val <- if (ll_total_calls < 100) 10 else if (ll_total_calls < 2000) 100 else 1000
     if (ll_call_count %% mod_val == 0) {
-      elapsed   <- as.numeric(difftime(Sys.time(), ll_start_time, units = 'mins'))
+      now_time <- Sys.time()
+      elapsed   <- as.numeric(difftime(now_time, ll_start_time, units = 'mins'))
       rate      <- ll_call_count / elapsed
       remaining <- (ll_total_calls - ll_call_count) / rate
       writeLines(sprintf(
-        "INDEX %s: Generation %d / %d (%.1f%%) | Elapsed: %.1f min | Est. remaining: %.1f min | Time per 1000 iterations: %.1f min \n",
+        "INDEX %s: Generation %d / %d (%.1f%%) | Elapsed: %.1f min \n 
+        Est. remaining: %.1f min | Time per 1000 iterations: %.1f min \n  
+        Last updated: %s",
         txt_output, ll_call_count, ll_total_calls,
-        100 * ll_call_count / ll_total_calls, elapsed, remaining, 1000 / rate
+        100 * ll_call_count / ll_total_calls, elapsed, remaining, 1000 / rate, as.character(now_time)
       ), txt_out)
     }
     

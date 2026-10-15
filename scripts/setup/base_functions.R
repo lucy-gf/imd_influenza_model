@@ -386,8 +386,9 @@ calc_matrix <- function(data,
                         age_pop,
                         age_limits_in = seq(0, 80, 5)){
   
-  data_grouped <- assign_age_groups(data, estimated_contact_age = RC_dist,
-                                    age_limits = age_limits_in)
+  # suppressing warnings about copying of data tables
+  data_grouped <- suppressWarnings(assign_age_groups(data, estimated_contact_age = RC_dist,
+                                    age_limits = age_limits_in))
   
   matrix <- compute_matrix(data_grouped)
   

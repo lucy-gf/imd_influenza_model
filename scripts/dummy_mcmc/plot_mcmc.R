@@ -297,7 +297,15 @@ if(WAS_HPC){
   m2 <- read_and_get_samples(2)
   m3 <- read_and_get_samples(3)
   
-  mcmc_samples <- rbind(m1, m2, m3)
+  # bind any non-empty data
+  mcmc_samples <- data.table()
+  for(t in 1:3){
+    dt <- get(paste0('m',t))
+    if(ncol(dt) > 1){
+      mcmc_samples <- rbind(mcmc_samples, dt)
+    }
+  }
+  
   mcmc_samples[, c('LP','LPr') := NULL]
   
 }else{
@@ -340,7 +348,7 @@ colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
 
 #### FILTER #### 
-burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
+burn_in <- 100000 #as.numeric(strsplit(number_str, split = '_')[[1]][1])
 thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
 n_samples <- as.numeric(strsplit(number_str, split = '_')[[1]][3]) #(max(mcmc_samples$iteration) - burn_in)/thinning_value
 
@@ -467,7 +475,7 @@ pairs_long <- rbind(pairs_long,
                     add_imd_data)
 pairs_long[substr(variable, 1, 3) != 'imd', variable := substr(variable, 1, nchar(variable) - 7)]
 
-pairs_long <- pairs_long[subtype_seasons, on = c('epidemic','epidemic_of_season')]
+pairs_long <- pairs_long[subtype_seasons[subtype_seasons$epidemic %in% unique(pairs_long$epidemic),], on = c('epidemic','epidemic_of_season')]
 pairs_long[, subtype_season := paste0(season, ': ', subtype)]
 pairs_long[, c('epidemic','epidemic_of_season','subtype','season', 'year') := NULL]
 

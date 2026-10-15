@@ -1,0 +1,842 @@
+---
+title: "Winter mixing"
+author: "Lucy Goodfellow"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(require(ggplot2))
+suppressPackageStartupMessages(require(tidyverse))
+suppressPackageStartupMessages(require(data.table))
+suppressPackageStartupMessages(require(readr))
+suppressPackageStartupMessages(require(readxl))
+suppressPackageStartupMessages(require(patchwork))
+suppressPackageStartupMessages(require(viridis))
+suppressPackageStartupMessages(require(flextable))
+suppressPackageStartupMessages(require(scales))
+suppressPackageStartupMessages(require(socialmixr))
+suppressPackageStartupMessages(require(contactsurveys))
+options(dplyr.summarise.inform = FALSE) 
+
+base_project_folder <- "/Users/lshlg12/Desktop/LSHTM/PhD_2528/IMD_influenza/imd_influenza_model"
+
+.args <- c(
+  file.path(base_project_folder, "data", "inputs", "contact_matrix.rds"),
+  file.path(base_project_folder, 'data','inputs','imd_age_pop.rds'),
+  file.path(base_project_folder, "data", "contact_matrix", "reconnect_part_holidays.rds")
+) 
+
+source(file.path(base_project_folder,'scripts','setup','base_functions.R'))
+source(file.path(base_project_folder,'scripts','setup','colors.R'))
+
+spec_holiday_colors <- c('#ADE25D','#3A5743','#25CED1')
+full_analysis_colors <- c('#FF8A5B','#EA526F','#25CED1')
+names(full_analysis_colors) <- c('All','Winter holidays','Not winter holidays')
+
+broad_age_limits <- c(0, 18, 65)
+broad_age_vals <- broad_age_limits[broad_age_limits != 0]
+broad_age_labels <- c(paste0(c(0, broad_age_vals[1:length(broad_age_vals)-1]), '-', c(broad_age_vals-1)), paste0(broad_age_vals[length(broad_age_vals)], '+'))
+
+## read in main contact matrix
+cm <- readRDS(.args[1])
+
+#### POPULATION DATA ####
+
+imd_age_pop <- readRDS(.args[2])
+broad_ages <- data.table(
+  age_grp = unique(imd_age_pop$age_grp),
+  age_group = fcn_assign_ages('[0,18)','[18,65)','[65,Inf)', unique(imd_age_pop$age_grp)))
+broad_age_pop <- imd_age_pop %>%
+  left_join(broad_ages, by = 'age_grp') %>%
+  group_by(age_group) %>%
+  summarise(population = sum(pop))
+
+#### RECONNECT DATA ####
+
+USE_ZENODO <- F
+
+if(USE_ZENODO){
+  
+  c_survey <- contactsurveys::download_survey("https://doi.org/10.5281/zenodo.16845074",
+                                              overwrite = T)
+  reconnect <- load_survey(c_survey, participant_key = c("part_id", "cont_id"))
+  
+}else{
+  
+  # ELSE MANUAL DOWNLOAD
+  rcp1 <- data.table(read_csv(file.path(base_project_folder, 'data','zenodo','reconnect_participant_common.csv'),show_col_types = F))
+  rcp2 <- data.table(read_csv(file.path(base_project_folder, 'data','zenodo','reconnect_participant_extra.csv'),show_col_types = F))
+  rcc1 <- data.table(read_csv(file.path(base_project_folder, 'data','zenodo','reconnect_contact_common.csv'),show_col_types = F))
+  rcc2 <- data.table(read_csv(file.path(base_project_folder, 'data','zenodo','reconnect_contact_extra.csv'),show_col_types = F))
+  
+  reconnect <- as_contact_survey(
+    x = list(
+      participants = rcp1[rcp2, on = 'part_id'],
+      contacts = rcc1[rcc2, on = 'cont_id']
+    )
+  )
+  
+}
+
+
+# change age grouping of participants
+reconnect$participants <- reconnect$participants %>%
+  mutate(part_age_group = cut(part_age_exact,
+                              breaks = c(-Inf, broad_age_vals, Inf),
+                              labels = broad_age_labels,
+                              right = F))
+
+# check old issue resolved
+if(sum(table(reconnect$participants$part_id) != 1) != 0){warning('Some participant IDs repeated')}
+
+#### ADD WEIGHTS ####
+## load population representativeness data
+{
+  # from census 2021 (https://www.ons.gov.uk/peoplepopulationandcommunity/culturalidentity
+  # /ethnicity/datasets/ethnicgroupbyageandsexinenglandandwales)
+  eth_age_sex <- suppressWarnings(data.table(read_xlsx(file.path(base_project_folder, "data","population","ethnicgroupagesex11.xlsx"), sheet = 6, skip = 3)))
+  eth_age_sex <- eth_age_sex[get(colnames(eth_age_sex)[1])=='K04000001',]
+  eth_age_sex[grepl('100 or over', Age), Age := 100]
+  eth_age_sex <- eth_age_sex[, lapply(.SD, c_to_0)]
+  eth_age_sex[, 3:ncol(eth_age_sex)] <- lapply(eth_age_sex[, 3:ncol(eth_age_sex)], as.numeric)
+  for(ethn in c('Asian','Black','Mixed','White','Other')){
+    for(sex in c('Female','Male')){
+      vec <- (substr(colnames(eth_age_sex),1,5) == ethn) & grepl(sex,colnames(eth_age_sex))
+      eth_age_sex$next_col <- rowSums(eth_age_sex[, ..vec])
+      colnames(eth_age_sex)[length(colnames(eth_age_sex))] <- paste0(ethn,'_',sex)
+    }
+  }
+  eth_age_sex <- eth_age_sex %>% select('Age',contains('_')) %>% mutate('p_age_group' = cut(Age,
+                                                                                            breaks = c(-Inf, broad_age_vals, Inf),
+                                                                                            labels = broad_age_labels,
+                                                                                            right = F)) %>%
+    mutate('p_adult_child' = cut(Age, breaks = c(-Inf, 18, Inf), labels = c('Child','Adult'), right = F)) %>%
+    select(!Age) %>% pivot_longer(!c(p_age_group, p_adult_child)) %>%
+    separate_wider_delim(name, delim = "_", names = c("p_ethnicity", "p_gender")) %>%
+    summarise(value = sum(value), .by = c(p_age_group, p_adult_child, p_ethnicity, p_gender)) %>% ungroup() %>%
+    mutate(proportion = value/sum(value)) %>% complete(p_adult_child, p_age_group, p_ethnicity, p_gender,
+                                                       fill = list(value = 0, proportion = 0))
+}
+
+## join weights
+part_data <- reconnect$participants %>%
+  mutate(part_gender = case_when(part_gender == 'F' ~ 'female', part_gender == 'M' ~ 'male'))
+colnames(part_data) <- gsub('part_', 'p_', colnames(part_data))
+weights <- weight_participants(part_data,
+                               weighting = c('p_age_group','p_gender','p_ethnicity','day_week'),
+                               group_vars = 'p_age_group')
+if(F){ ## can plot
+  ggplot(weights) +
+  geom_hline(yintercept = 1, lty = 2, alpha = 0.5) +
+  geom_jitter(aes(p_ethnicity, y = post_strat_weight, col = p_ethnicity, shape = day_week), height = 0.01, alpha = 0.7) +
+  theme_lg() + facet_grid(p_gender~p_age_group, scales = 'fixed')
+}
+
+# merge
+reconnect$participants <- reconnect$participants %>% left_join(weights %>% 
+                                       select(p_id, post_strat_weight) %>% rename(part_id = p_id),
+                                     by = 'part_id')
+
+reconnect <- reconnect %>% weigh("post_strat_weight")
+
+# not important about assigning large group contacts' ages since the
+# age groups are the same as the estimated bands used in the survey
+RC_dist <- socialmixr::contact_age_distribution(reconnect)
+
+#### ADDITIONAL PARTICIPANT COLUMNS ####
+
+# add country and holiday factor
+rc_holidays <- readRDS(.args[3]) %>% rename(part_id = p_id) %>% 
+  mutate(IS_XMAS = case_when(p_termtime == 'xmas_holiday' ~ T, T ~ F))
+
+reconnect$participants <- reconnect$participants %>% 
+  left_join(rc_holidays, by = 'part_id')
+
+```
+
+How do people's contacts change over the winter holidays? How could this be easily represented in a transmission model of respiratory viruses by scaling social contacts?
+
+Winter holidays are here broadly defined as school closures over the Christmas and New Year period.
+
+## Data
+
+This analysis is using data from the Reconnect social contact survey, which collected data from November 2024 - March 2025, filtered to participants living in England. In this dataset, school holidays are defined as Saturday 21st December to Sunday 5th January.
+
+What proportion of Reconnect participants filled in the survey in each period of the year?
+
+```{r echo=FALSE}
+tb <- reconnect$participants %>% filter(p_country == 'England') %>%
+  group_by(part_age_group, p_broad_hols, p_termtime) %>% 
+  count() %>% drop_na() %>% 
+  group_by(part_age_group) %>% mutate(total = sum(n)) %>% 
+  mutate(Participants = paste0(n),
+         `Proportion of age group` = paste0(100*round(n/total, 3), '%')) %>% 
+  select(!c(n,total)) %>% 
+  rename(`Age group` = part_age_group,
+         `Broad holidays` = p_broad_hols,
+         `Specific holiday` = p_termtime)
+
+flextable(tb)
+```
+
+```{r echo=FALSE, fig.height = 8, fig.width = 12, fig.align = "center"}
+# reconnect$participants %>% filter(p_country == 'England') %>% 
+#   group_by(part_age_group, c_contact_date, p_broad_hols, p_termtime) %>% 
+#   count() %>% 
+#   drop_na() %>% 
+#   ggplot() +
+#   geom_bar(aes(x = c_contact_date, y = n, fill = p_termtime),
+#            stat = 'identity', position = 'stack', width = 1) +
+#   facet_grid(part_age_group ~ ., scales = 'free') +
+#   scale_fill_manual(values = spec_holiday_colors) +
+#   theme_lg() + labs(x = '', fill = '', y = 'N participants')
+
+coef <- 7
+
+reconnect$participants %>% 
+  left_join(reconnect$contacts %>% group_by(part_id) %>% count() %>% ungroup() %>% 
+              complete(part_id = unique(reconnect$participants$part_id), fill = list(n = 0)),
+            by = 'part_id') %>% 
+  filter(p_country == 'England') %>% 
+  group_by(part_age_group, c_contact_date, p_broad_hols, p_termtime) %>% 
+  summarise(mean = mean(n), n_part = n()) %>% 
+  drop_na() %>% group_by(part_age_group) %>% mutate(max_n_part = max(n_part)) %>% 
+  ggplot() +
+  geom_bar(aes(x = c_contact_date, y = n_part/coef, fill = p_termtime),
+           stat = 'identity', position = 'stack', width = 1, alpha = 1) +
+  geom_point(aes(c_contact_date, mean),
+             col = 'white', size = 2, alpha = 0.75) +
+  geom_point(aes(c_contact_date, mean, col = p_termtime), 
+             stroke = 1, size = 2, shape = 1) +
+  geom_vline(xintercept = as.Date('25-12-2024', format = '%d-%m-%Y'), lty = 2, alpha = 0.5) +
+  geom_vline(xintercept = as.Date('01-01-2025', format = '%d-%m-%Y'), lty = 2, alpha = 0.5) +
+  facet_wrap(. ~ part_age_group, scales = 'free_y', nrow = 3) +
+  scale_color_manual(values = spec_holiday_colors) +
+  scale_fill_manual(values = spec_holiday_colors) +
+  scale_y_continuous(
+    name = "Mean contacts (points)",
+    sec.axis = sec_axis(transform =~.*10, name="N participants (bars)")
+  ) + 
+  theme_lg() + theme(legend.position = 'bottom') +
+  labs(x = '', fill = '', col = '')
+```
+
+**Figure 1.** Crude mean number of contacts reported each day of the survey period (points), and number of participants completing the survey (bars). Dotted lines show Christmas 2024 and New Year's Day 2025.
+
+```{r echo = FALSE}
+## Data cleaning: filter to England only
+reconnect$participants <- reconnect$participants %>% 
+  filter(p_country == 'England')
+reconnect$contacts <- reconnect$contacts %>% 
+  filter(part_id %in% reconnect$participants$part_id) %>% 
+  mutate(cnt_location = case_when(
+    cnt_school ~ 'School',
+    cnt_work ~ 'Work',
+    cnt_otherplace ~ 'Other',
+    cnt_home ~ 'Home'
+  ))
+
+```
+
+> **Data cleaning:** some people (n = 24) reported school contacts in the winter holidays, 10 of these on Sunday 5th January. On inspection, these individuals filled in the survey on Monday 6th, and inputted that their contacts referred to "yesterday", hence being classed as contacts in the winter holidays. These individuals were manually assigned back to the "not winter holidays" category.
+
+## Mean contacts by winter holiday and broad age group
+
+Calculating the mean number of contacts reported by people in each time period (categories: winter holidays, not winter holidays, all time), using a negative binomial model.
+
+```{r echo=FALSE, cache=TRUE}
+### MANUAL FIX (SOME SCHOOL CONTACTS REPORTED ON Sunday 5th January, changing these to non-xmas)
+MANUAL_FIX <- T
+
+if(MANUAL_FIX){
+  school_non_zero <- unique((reconnect$contacts %>% 
+  filter(cnt_location == 'School'))$part_id)
+  
+  side_dat_school_hols <- reconnect$participants %>% 
+    filter(c_contact_date == as.Date('05-01-2025', format = '%d-%m-%Y'),
+           part_id %in% school_non_zero) 
+
+  reconnect$participants <- reconnect$participants %>% 
+    mutate(IS_XMAS = case_when(
+      c_contact_date == as.Date('05-01-2025', format = '%d-%m-%Y') &
+      part_id %in% school_non_zero ~ F,
+      T ~ IS_XMAS))  
+}
+```
+
+```{r echo=FALSE, cache=TRUE}
+#### MEAN CONTACTS ####
+## by broad age and holiday
+
+filters <- c('winter_holidays','all')
+
+filter_to_title <- function(strings){
+  for(i in 1:length(strings)){
+    st <- gsub('_', ' ', strings[i])
+    st <- paste0(str_to_upper(substr(st,1,1)), substr(st, 2, nchar(st)))
+    strings[i] <- st
+  }
+  strings
+}
+
+filtered_means <- function(filter, locn_strat = F,
+                           age_limits_in = broad_age_vals){
+  
+  age_limits_in <- age_limits_in[age_limits_in != 0]
+  age_labels_in <- c(paste0(c(0, age_limits_in[1:length(age_limits_in)-1]), '-', c(age_limits_in-1)), paste0(age_limits_in[length(age_limits_in)], '+'))
+  
+  strat_vars <- c('part_age_group')
+  if(locn_strat){strat_vars <- c(strat_vars, 'cnt_location')}
+  
+  hols_analysis <- if(!locn_strat){
+    
+    copy(reconnect$participants) %>% 
+      mutate(part_age_group = cut(part_age_exact,
+                              breaks = c(-Inf, age_limits_in, Inf),
+                              labels = age_labels_in,
+                              right = F)) %>% 
+      select(part_id, part_age_group, IS_XMAS) %>% 
+      left_join(reconnect$contacts %>% 
+                  group_by(part_id) %>% count(), 
+                by = 'part_id') %>% filter(!is.na(IS_XMAS))
+    
+    }else{
+      
+    copy(reconnect$participants) %>% 
+        mutate(part_age_group = cut(part_age_exact,
+                                breaks = c(-Inf, age_limits_in, Inf),
+                                labels = age_labels_in,
+                                right = F)) %>% 
+        select(part_id, part_age_group, IS_XMAS) %>% ungroup() %>% 
+        left_join(reconnect$contacts %>% 
+                    group_by(part_id, cnt_location) %>% count(), 
+                  by = 'part_id') %>% 
+        group_by(part_id, part_age_group, IS_XMAS) %>% 
+        complete(cnt_location = c('Home','School','Work','Other')) %>% 
+        filter(!is.na(cnt_location)) %>% ungroup()
+      
+    }
+  
+  if(locn_strat & nrow(hols_analysis) != 4*n_distinct(reconnect$participants$part_id)){warning('Holiday-setting rows incorrect!')}
+  
+  if(filter == 'winter_holidays'){
+    hols_analysis <- hols_analysis %>% filter(IS_XMAS)
+  }
+  if(filter == 'not_winter_holidays'){
+    hols_analysis <- hols_analysis %>% filter(!IS_XMAS)
+  }
+  
+  hols_analysis$n <- na_to_0(hols_analysis$n)
+  hols_analysis <- hols_analysis %>% select(!c(part_id, IS_XMAS))
+  
+  hols_analysis <- data.table(hols_analysis)
+
+  mean_contacts_hols <- hols_analysis[, lapply(.SD, neg_bin_fcn), by = strat_vars]
+  mean_contacts_hols[, analysis := filter]
+  
+  return(list(hols_analysis[, analysis := filter], mean_contacts_hols))
+}
+
+mean_contacts <- rbindlist(map(.x = filters, .f = ~{out <- filtered_means(.x); out[[2]]}))
+mean_contacts_locn <- rbindlist(map(.x = filters, .f = ~{filtered_means(.x, locn_strat = T)[[2]]}))
+mean_contacts_locn_fine <- rbindlist(map(.x = filters, .f = ~{filtered_means(.x, locn_strat = T, age_limits_in = seq(5, 80, by = 5))[[2]]}))
+```
+
+```{r echo=FALSE, cache=TRUE, fig.height = 10, fig.width = 10, fig.align = "center"}
+
+p1 <- mean_contacts %>% 
+  mutate(analysis = filter_to_title(analysis)) %>% 
+  ggplot() +
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+                        size = 4, alpha = 0.3, position = position_dodge(width = 0.4)) + 
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+             size = 4, shape = 1, alpha = 1, stroke = 1.5, position = position_dodge(width = 0.4)) + 
+  theme_lg() + labs(x = '', col = '', y = 'Mean daily contacts') +
+  scale_color_manual(values = full_analysis_colors) +
+  theme(legend.position = 'none') + 
+  ylim(c(0,NA))
+
+p2 <- mean_contacts_locn %>% 
+  mutate(analysis = filter_to_title(analysis)) %>% 
+  ggplot() +
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+                        size = 3, alpha = 0.3, position = position_dodge(width = 0.4)) + 
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+             size = 3, shape = 1, alpha = 1, stroke = 1.5, position = position_dodge(width = 0.4)) + 
+  theme_lg() + labs(x = '', col = '', y = 'Mean daily contacts') +
+  scale_color_manual(values = full_analysis_colors) +
+  facet_wrap(cnt_location ~ ., scales = 'free') + 
+  ylim(c(0,NA))
+
+p3 <- mean_contacts_locn_fine %>% 
+  mutate(analysis = filter_to_title(analysis)) %>% 
+  ggplot() +
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+                        size = 2, alpha = 0.3, position = position_dodge(width = 0)) + 
+  geom_point(aes(x = part_age_group, y = n, col = analysis),
+             size = 2, shape = 1, alpha = 1, stroke = 1.5, position = position_dodge(width = 0)) + 
+  theme_lg() + labs(x = '', col = '', y = 'Mean daily contacts') +
+  scale_color_manual(values = full_analysis_colors) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+        legend.position = 'none') +
+  facet_wrap(cnt_location ~ ., scales = 'free') + 
+  ylim(c(0,NA))
+
+layout <- 'ABB\nCCC'
+
+p1 + p2 + p3 + plot_layout(design = layout, guides = 'collect')
+
+# comb_dat <- rbindlist(map(.x = filters, .f = ~{filtered_means(.x, locn_strat = F)[[1]]})) %>% 
+#   left_join(mean_contacts %>% rename(mean_n = n), by = c('part_age_group','analysis')) %>% 
+#     mutate(analysis = filter_to_title(analysis)) %>% 
+#   mutate(part_age_group = case_when(part_age_group == '0-17' ~ 1,
+#                                     part_age_group == '18-64' ~ 2,
+#                                     part_age_group == '65+' ~ 3))
+# ggplot() +
+#   geom_rect(data = comb_dat, aes(xmin = part_age_group - 0.3, xmax = part_age_group + 0.3, ymin=n, ymax = n+1, fill = analysis),
+#              position = position_dodge(width = 0.8), alpha = 0.06) + 
+#   geom_point(data = comb_dat %>% select(!n) %>% unique(),
+#              aes(x = part_age_group, y = mean_n, group = analysis), col = 'white',
+#              size = 3, alpha = 0.8, position = position_dodge(width = 0.8)) +
+#   geom_point(data = comb_dat %>% select(!n) %>% unique(),
+#              aes(x = part_age_group, y = mean_n, col = analysis),
+#              size = 3, shape = 1, alpha = 1, stroke = 1.5, position = position_dodge(width = 0.8)) +
+#   theme_bw() + labs(x = '', col = '', fill = '', y = 'Mean daily contacts') +
+#   scale_color_manual(values = full_analysis_colors) +
+#   scale_fill_manual(values = full_analysis_colors) +
+#   ylim(c(0,NA))
+# 
+# comb_dat_locn <- rbindlist(map(.x = filters, .f = ~{filtered_means(.x, locn_strat = T)[[1]]})) %>%
+#   left_join(mean_contacts_locn %>% rename(mean_n = n), by = c('part_age_group','cnt_location')) %>%
+#     mutate(analysis = filter_to_title(analysis)) %>%
+#   mutate(part_age_group = case_when(part_age_group == '0-17' ~ 1,
+#                                     part_age_group == '18-64' ~ 2,
+#                                     part_age_group == '65+' ~ 3))
+# ggplot() +
+#   geom_rect(data = comb_dat_locn, aes(xmin = part_age_group - 0.3, xmax = part_age_group + 0.3, ymin=n, ymax = n+1, fill = analysis),
+#              position = position_dodge(width = 0.8), alpha = 0.06) +
+#   geom_point(data = comb_dat_locn %>% select(!n) %>% unique(),
+#              aes(x = part_age_group, y = mean_n, group = analysis), col = 'white',
+#              size = 3, alpha = 0.8, position = position_dodge(width = 0.8)) +
+#   geom_point(data = comb_dat_locn %>% select(!n) %>% unique(),
+#              aes(x = part_age_group, y = mean_n, col = analysis),
+#              size = 3, shape = 1, alpha = 1, stroke = 1.5, position = position_dodge(width = 0.8)) +
+#   theme_bw() + labs(x = '', col = '', fill = '', y = 'Mean daily contacts') +
+#   scale_color_manual(values = full_analysis_colors) +
+#   scale_fill_manual(values = full_analysis_colors) +
+#   facet_wrap(cnt_location ~ ., scales = 'free') +
+#   ylim(c(0,NA))
+
+```
+
+**Figure 2.** Mean daily contacts reported by survey participants in each broad age group and in each time period, overall and stratified by contact setting.
+
+Contacts decrease the most in winter holidays for children aged 0-17 (39%), and only decrease a small amount for adults (7%) and older adults (8%).
+
+```{r echo = FALSE}
+mean_contacts %>% 
+  pivot_wider(names_from = analysis, values_from = n) %>% 
+  group_by(part_age_group) %>% 
+  summarise(sum_all = sum(all),
+            sum_winter_holiday = sum(winter_holidays)) %>% 
+  mutate(`Winter contact difference` = paste0(round(100*(sum_winter_holiday - sum_all)/sum_all, 2), '%')) %>% 
+  select(part_age_group, `Winter contact difference`) %>% rename(Age = part_age_group) %>% flextable()
+```
+
+```{r echo=FALSE, cache=TRUE, fig.height = 5, fig.width = 10, fig.align = "center"}
+
+plot_histogram <- function(filter, locn_strat = F, 
+                           max_contacts = 25){
+  
+  strat_vars <- c('part_age_group')
+  if(locn_strat){strat_vars <- c(strat_vars, 'cnt_location')}
+  
+  hols_analysis <- if(!locn_strat){
+    
+    copy(reconnect$participants) %>% 
+      select(part_id, part_age_group, IS_XMAS) %>% 
+      left_join(reconnect$contacts %>% 
+                  group_by(part_id) %>% count() %>% ungroup() %>% 
+                complete(part_id = unique(reconnect$participants$part_id), fill = list(n = 0)),
+            by = 'part_id')
+    
+    }else{
+      
+    copy(reconnect$participants) %>% 
+        select(part_id, part_age_group, IS_XMAS) %>% ungroup() %>% 
+        left_join(reconnect$contacts %>% 
+                  group_by(part_id, cnt_location) %>% count() %>% group_by(cnt_location) %>% 
+              complete(part_id = unique(reconnect$participants$part_id), fill = list(n = 0)),
+            by = 'part_id') %>% 
+        group_by(part_id, part_age_group, IS_XMAS) %>% 
+        complete(cnt_location = c('Home','School','Work','Other')) %>% 
+        filter(!is.na(cnt_location)) %>% ungroup()
+      
+    }
+  
+  if(locn_strat & nrow(hols_analysis) != 4*n_distinct(reconnect$participants$part_id)){warning('Holiday-setting rows incorrect!')}
+  
+  if(filter == 'winter_holidays'){
+    hols_analysis <- hols_analysis %>% filter(IS_XMAS)
+  }
+  if(filter == 'not_winter_holidays'){
+    hols_analysis <- hols_analysis %>% filter(!IS_XMAS)
+  }
+  
+  hols_analysis$n <- na_to_0(hols_analysis$n)
+  hols_analysis <- hols_analysis %>% select(!c(part_id, IS_XMAS))
+  
+  hols_analysis <- data.table(hols_analysis)
+  
+  vars <- c('part_age_group')
+  if(locn_strat){vars <- c(vars, 'cnt_location')}
+
+  p <- hols_analysis %>% 
+    group_by(!!!syms(vars)) %>% 
+    mutate(mean = mean(n)) %>% 
+    filter(n %in% 0:max_contacts) %>% 
+    rename(n_contacts = n) %>% 
+    group_by(!!!syms(vars), n_contacts, mean) %>% count() %>% 
+    ggplot() +
+    geom_bar(aes(x = n_contacts, y = n),
+             position = 'stack', stat = 'identity', width = 1,
+             fill = full_analysis_colors[filter_to_title(filter)]) +
+    geom_vline(aes(xintercept = mean), alpha = 0.5, lty = 2) + 
+    xlim(c(-1, max_contacts + 1)) +
+    labs(x = 'Daily contacts', y = 'Count', 
+         subtitle = filter_to_title(filter)) +
+    theme_lg() + theme(plot.subtitle = element_text(face = 'bold'))
+  
+  p <- if(locn_strat){
+    p + facet_wrap(part_age_group ~ cnt_location, scales = 'free', nrow = 3)
+  }else{
+    p + facet_wrap(part_age_group ~ ., scales = 'free', nrow = 1)
+  }
+  
+  return(p)
+}
+
+filters <- c('winter_holidays','all')
+
+plots <- map(.x = filters, .f = plot_histogram)
+
+# plots[[1]] <- plots[[1]] + ggtitle('Daily contacts, capped at 25')
+
+plots_locn <- map(.x = filters, .f = ~{plot_histogram(filter = .x, locn_strat = T, max_contacts = 15)})
+
+```
+
+```{r echo=FALSE, fig.height = 10, fig.width = 10, fig.align = "center"}
+
+suppressWarnings(patchwork::wrap_plots(plots, nrow = length(plots)))
+
+```
+
+**Figure 3.** Daily contact histogram (capped at 25 contacts). Crude mean shown as a dotted line.
+
+```{r echo=FALSE, cache=TRUE, fig.height = 14, fig.width = 10, fig.align = "center"}
+
+patchwork::wrap_plots(plots_locn, nrow = length(plots_locn))
+
+```
+
+**Figure 4.** Daily contact histogram (capped at 15 contacts), stratified by contact setting. Crude mean shown as a dotted line.
+
+## Contact matrices
+
+Calculating social contact matrices across broad age groups, using the `socialmixr` package. Calculations are weighted by age, gender, ethnicity, day of week (like all Reconnect analyses). Reciprocity of contacts is enforced between broad age groups in the calculations. 
+
+```{r echo=FALSE, cache=TRUE, include=FALSE}
+#### CONTACT MATRICES ####
+
+reciprocal_FLAG <- T
+
+# filtered to IS_XMAS
+reconnect_XMAS <- copy(reconnect)
+reconnect_XMAS$participants <- reconnect_XMAS$participants %>% 
+  filter(IS_XMAS)
+reconnect_XMAS$contacts <- reconnect_XMAS$contacts %>% 
+  filter(part_id %in% reconnect_XMAS$participants$part_id)
+
+# filtered to !IS_XMAS
+reconnect_NOT_XMAS <- copy(reconnect)
+reconnect_NOT_XMAS$participants <- reconnect_NOT_XMAS$participants %>% 
+  filter(!IS_XMAS)
+reconnect_NOT_XMAS$contacts <- reconnect_NOT_XMAS$contacts %>% 
+  filter(part_id %in% reconnect_NOT_XMAS$participants$part_id)
+
+# calculated
+xmas_matrix <- calc_matrix(reconnect_XMAS, 
+                           reciprocal = reciprocal_FLAG,
+                           age_pop = broad_age_pop,
+                           age_limits_in = broad_age_limits)
+not_xmas_matrix <- calc_matrix(reconnect_NOT_XMAS, 
+                               reciprocal = reciprocal_FLAG,
+                               age_pop = broad_age_pop,
+                               age_limits_in = broad_age_limits)
+main_matrix <- calc_matrix(reconnect, 
+                           reciprocal = reciprocal_FLAG,
+                           age_pop = broad_age_pop,
+                           age_limits_in = broad_age_limits)
+
+# combine
+holiday_cm <- main_matrix %>% 
+  left_join(xmas_matrix, by = c('part_age','cont_age'), suffix = c('','_winter_holiday')) %>% 
+  mutate(diff = value_winter_holiday - value,
+         propdiff = diff/value) 
+
+holiday_cm %>% 
+  group_by(part_age) %>% 
+  summarise(sum_value = sum(value),
+            sum_value_winter_holiday = sum(value_winter_holiday)) %>% 
+  mutate(overall_propdiff = 100*(sum_value_winter_holiday - sum_value)/sum_value) %>% flextable()
+
+#### PLOT ####
+max_value <- max(c(xmas_matrix$value,
+                   main_matrix$value))
+
+p_wh <- xmas_matrix %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = value)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                label = round(value, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'Winter holidays') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  coord_fixed()
+
+p_main <- main_matrix %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = value)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(value, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'All contacts') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  coord_fixed()
+
+pdiff <- holiday_cm %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = diff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(diff, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("blue"), mid = "white", 
+                                    high = muted("red")) +
+  coord_fixed()
+
+pdiffprop <- holiday_cm %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = propdiff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = paste0(100*round(propdiff, 2),'%')), 
+             col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Percentage difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("green"), mid = "white", 
+                                    high = muted("purple")) +
+  coord_fixed()
+
+```
+
+```{r echo=FALSE, cache=TRUE, fig.height = 10, fig.width = 16, fig.align = "center"}
+patchwork::wrap_plots(list(p_main, p_wh, pdiff, pdiffprop), plot_layout(nrow = 2)) + plot_annotation(tag_levels = 'a', 
+                                                              tag_prefix = '(',
+                                                              tag_suffix = ')')
+```
+
+**Figure 5.** Social contact matrices, stratified by broad age group and survey time period.
+
+## Setting-specific contact matrices
+
+```{r echo=FALSE, cache=TRUE, include=FALSE, fig.height = 20, fig.width = 20, fig.align = "center"}
+#### SETTING-SPECIFIC CONTACT MATRICES ####
+
+remove_large_contacts <- F
+
+setting_and_holiday <- data.table()
+
+for(holiday in c(T, F, NA)){
+  for(locn in c('Home','School','Work','Other')){
+    
+    # filtered contact data
+    reconnect_copy <- copy(reconnect)
+    reconnect_copy$participants <- if(is.na(holiday)){
+      reconnect_copy$participants
+    }else{
+      reconnect_copy$participants %>% 
+        filter(IS_XMAS == holiday)
+    }
+    reconnect_copy$contacts <- if(remove_large_contacts){
+      reconnect_copy$contacts %>% 
+      filter(part_id %in% reconnect_copy$participants$part_id, 
+             cnt_location == locn,
+             !is.na(cnt_age_exact))
+    }else{
+      reconnect_copy$contacts %>% 
+        filter(part_id %in% reconnect_copy$participants$part_id, 
+               cnt_location == locn)
+    }
+    
+    matr <- calc_matrix(reconnect_copy, 
+                reciprocal = reciprocal_FLAG,
+                age_pop = broad_age_pop,
+                age_limits_in = broad_age_limits)
+    
+    holiday_name <- if(is.na(holiday)){
+      'all'
+    }else{if(holiday){'winter_hols'}else{'not_winter_hols'}}
+    
+    setting_and_holiday <- rbind(
+      setting_and_holiday,
+      matr %>% mutate(locn = locn, winter_holiday = holiday_name)
+    )
+    
+  }
+}
+
+setting_and_holiday_w <- setting_and_holiday %>% 
+  pivot_wider(names_from = winter_holiday, values_from = value) %>% 
+  mutate(diff = winter_hols - all,
+         propdiff = diff/all) 
+
+setting_and_holiday_w %>% 
+  group_by(part_age, locn) %>% 
+  summarise(sum_all = sum(all),
+            sum_winter_hols = sum(winter_hols)) %>% 
+  mutate(overall_propdiff = 100*(sum_winter_hols - sum_all)/sum_all)
+
+#### PLOT ####
+max_value <- max(c(setting_and_holiday_w$all,
+                   setting_and_holiday_w$winter_hols))
+
+p_wh <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = winter_hols)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(winter_hols, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'Winter holidays') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  facet_wrap(locn ~ ., scales = 'free')
+
+p_main <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = all)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(all, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'All contacts') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  facet_wrap(locn ~ ., scales = 'free')
+
+pdiff <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = diff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(diff, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("blue"), mid = "white", 
+                                    high = muted("red")) +
+  facet_wrap(locn ~ ., scales = 'free')
+
+pdiffprop <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = propdiff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = paste0(100*round(propdiff, 2),'%')), 
+             col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Percentage difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("green"), mid = "white", 
+                                    high = muted("purple")) +
+  facet_wrap(locn ~ ., scales = 'free')
+
+```
+
+```{r echo=FALSE, cache=TRUE, fig.height = 13, fig.width = 16, fig.align = "center"}
+p_main + p_wh + 
+  pdiff + pdiffprop + plot_layout(nrow = 2) + plot_annotation(tag_levels = 'a', tag_prefix = '(', tag_suffix = ')')
+
+```
+**Figure 6.** Social contact matrices, stratified by contact setting, broad age group and survey time period.
+
+## Removing school contacts
+
+How does a general matrix with school contacts removed compare to the winter holidays matrix?
+
+```{r echo=FALSE, cache=TRUE, fig.height = 7, fig.width = 20, fig.align = "center"}
+
+gen_no_sch <- setting_and_holiday_w %>% 
+  filter(locn != 'School') %>% 
+  group_by(part_age, cont_age) %>% summarise(n_gen_ns = sum(all))
+
+wint <- setting_and_holiday_w %>%
+  group_by(part_age, cont_age) %>% summarise(n_wint = sum(winter_hols))
+
+comp <- gen_no_sch %>% 
+  left_join(wint, by = c('part_age','cont_age'))
+
+p1 <- comp %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = n_wint)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(n_wint, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'Winter holidays') +
+  theme_lg() + scale_fill_viridis(limits = c(0, max(c(comp$n_gen_ns, comp$n_wint)))) +
+  coord_fixed()
+
+p2 <- comp %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = n_gen_ns)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(n_gen_ns, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'General, with school removed') +
+  theme_lg() + scale_fill_viridis(limits = c(0, max(c(comp$n_gen_ns, comp$n_wint)))) +
+  coord_fixed()
+
+p3 <- comp %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = (n_gen_ns - n_wint)/n_gen_ns)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round((n_gen_ns - n_wint)/n_gen_ns, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Difference', subtitle = 'Positive = removing school underestimates winter contacts,\nNegative = removing school overestimates winter contacts') +
+  theme_lg() + scale_fill_gradient2(low = muted("green"), mid = "white", 
+                                    high = muted("purple")) +
+  coord_fixed()
+
+p1 + p2 + p3 + plot_annotation(tag_levels = 'a', tag_prefix = '(', tag_suffix = ')')
+
+```
+
+**Figure 7.** Social contact matrices using winter holidays data or using all data and removing school contacts.
+
+By removing school contacts from the general contact matrix, but keeping all "home", "work", and "other" contacts, the resulting contact matrix underestimates contacts between older adults and children/older adults (green tiles), and overestimates contacts between children and children, older adults and older adults, and children and adults (purple tiles).
+
+
+> TODO: Are they *significantly* different?
+
+
+
+
+
+

@@ -59,4 +59,11 @@ Rplots.pdf
 /data/dummy_data
 /data/ukhsa
 /data/contact_matrix
+/data/zenodo
+
 README.html
+
+scripts/setup/winter_mixing_cache
+scripts/setup/winter_mixing_files
+
+*html

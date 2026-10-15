@@ -205,6 +205,6 @@ write_rds(data.table(x=number_string,
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',
                                            thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
-                             gsub('data/',paste0('data/',number_string),.args[6])))
+                             gsub('data/',paste0('data/',number_string,'/'),.args[6])))
 
 

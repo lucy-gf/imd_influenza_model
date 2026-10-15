@@ -113,6 +113,8 @@ Output is written to `output/`, with subdirectories for figures (`output/figures
 
 This is work in progress! Examples of elements which are not yet in the model:
 
+``🤝`` Propagation of contact matrix uncertainty (bootstrapping)
+
 ``💉`` Better-informed estimates of VE against infection 
 
 ``🎆`` Changes in social mixing in the holiday period

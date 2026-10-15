@@ -7,6 +7,7 @@ suppressPackageStartupMessages(require(readr))
 suppressPackageStartupMessages(require(readxl))
 suppressPackageStartupMessages(require(patchwork))
 suppressPackageStartupMessages(require(viridis))
+suppressPackageStartupMessages(require(scales))
 suppressPackageStartupMessages(require(socialmixr))
 suppressPackageStartupMessages(require(contactsurveys))
 options(dplyr.summarise.inform = FALSE) 
@@ -142,6 +143,14 @@ reconnect$contacts <- reconnect$contacts %>%
 #### MEAN CONTACTS ####
 ## by broad age and holiday
 
+reconnect$contacts <- reconnect$contacts %>% 
+  mutate(cnt_location = case_when(
+    cnt_school ~ 'School',
+    cnt_work ~ 'Work',
+    cnt_otherplace ~ 'Other',
+    cnt_home ~ 'Home'
+  ))
+ 
 hols_analysis <- copy(reconnect$participants) %>% 
   select(part_id, part_age_group, IS_XMAS) %>% 
   left_join(reconnect$contacts %>% 
@@ -167,7 +176,7 @@ hols_analysis_stratified$n <- na_to_0(hols_analysis_stratified$n)
 hols_analysis_stratified <- hols_analysis_stratified %>% select(!part_id)
 mean_contacts_hols_stratified <- hols_analysis_stratified[, lapply(.SD, neg_bin_fcn), by = c('part_age_group','p_termtime')]
 
-mean_contacts_hols_stratified %>% 
+p1 <- mean_contacts_hols_stratified %>% 
   ggplot() +
   geom_point(aes(x = part_age_group, y = n, col = p_termtime),
                         size = 4, alpha = 0.5) + 
@@ -176,6 +185,46 @@ mean_contacts_hols_stratified %>%
   theme_bw() + labs(x = '', col = '', y = 'Mean daily contacts') +
   scale_color_manual(values = c('#FF8A5B','#EA526F','#25CED1')) +
   ylim(c(0,NA))
+
+hols_analysis_locn <- copy(reconnect$participants) %>% 
+  select(part_id, part_age_group, p_termtime) %>% ungroup() %>% 
+  left_join(reconnect$contacts %>% 
+              group_by(part_id, cnt_location) %>% count(), 
+            by = 'part_id') %>% 
+  group_by(part_id, part_age_group, p_termtime) %>% 
+  complete(cnt_location = c('Home','School','Work','Other')) %>% 
+  filter(!is.na(cnt_location)) %>% ungroup()
+# check correct nrow
+if(nrow(hols_analysis_locn) != 4*n_distinct(reconnect$participants$part_id)){warning('Holiday-setting rows incorrect!')}
+hols_analysis_locn$n <- na_to_0(hols_analysis_locn$n)
+hols_analysis_locn <- hols_analysis_locn %>% filter(!is.na(p_termtime)) %>% select(!part_id)
+hols_analysis_locn <- data.table(hols_analysis_locn)
+
+mean_contacts_hols_locn <- hols_analysis_locn[, lapply(.SD, neg_bin_fcn), by = c('part_age_group','p_termtime','cnt_location')]
+
+p2 <- mean_contacts_hols_locn %>% 
+  ggplot() +
+  geom_point(aes(x = part_age_group, y = n, col = p_termtime),
+             size = 4, alpha = 0.5) + 
+  geom_point(aes(x = part_age_group, y = n, col = p_termtime),
+             size = 4, shape = 1, alpha = 1, stroke = 2) + 
+  theme_lg() + labs(x = '', col = '', y = 'Mean daily contacts') +
+  scale_color_manual(values = c('#FF8A5B','#EA526F','#25CED1')) +
+  ylim(c(0,NA)) + facet_wrap(cnt_location ~ ., scales = 'free')
+
+p1 + p2 + plot_layout(nrow = 2, heights = c(2,4))
+
+ggsave(file.path('output','figures','exploration','winter_mixing','mean_holiday_contacts.png'),
+       width = 13, height = 13)
+
+hols_analysis_locn %>% 
+  filter(cnt_location == 'School') %>% 
+  ggplot() + 
+  geom_histogram(aes(n, fill = p_termtime), bins = 50) +
+  theme_lg() + labs(fill = '', x = 'Daily contacts') +
+  scale_fill_manual(values = c('#FF8A5B','#EA526F','#25CED1')) +
+  xlim(c(0,50)) + 
+  facet_grid(part_age_group ~ p_termtime, scales = 'free')
 
 #### CONTACT MATRICES ####
 
@@ -273,8 +322,124 @@ pdiffprop <- holiday_cm %>%
 
 p_main + p_wh + 
   pdiff + pdiffprop + plot_layout(nrow = 2)
-ggsave(file.path('output','figures','exploration','holiday_contacts.png'),
+ggsave(file.path('output','figures','exploration','winter_mixing','holiday_contacts.png'),
        width = 16, height = 13)
+
+#### SETTING-SPECIFIC CONTACT MATRICES ####
+
+remove_large_contacts <- F
+
+setting_and_holiday <- data.table()
+
+for(holiday in c(T, F, NA)){
+  for(locn in c('Home','School','Work','Other')){
+    
+    # filtered contact data
+    reconnect_copy <- copy(reconnect)
+    reconnect_copy$participants <- if(is.na(holiday)){
+      reconnect_copy$participants
+    }else{
+      reconnect_copy$participants %>% 
+        filter(IS_XMAS == holiday)
+    }
+    reconnect_copy$contacts <- if(remove_large_contacts){
+      reconnect_copy$contacts %>% 
+      filter(part_id %in% reconnect_copy$participants$part_id, 
+             cnt_location == locn,
+             !is.na(cnt_age_exact))
+    }else{
+      reconnect_copy$contacts %>% 
+        filter(part_id %in% reconnect_copy$participants$part_id, 
+               cnt_location == locn)
+    }
+    
+    matr <- calc_matrix(reconnect_copy, 
+                reciprocal = reciprocal_FLAG,
+                age_pop = broad_age_pop,
+                age_limits_in = broad_age_limits)
+    
+    holiday_name <- if(is.na(holiday)){
+      'all'
+    }else{if(holiday){'winter_hols'}else{'not_winter_hols'}}
+    
+    setting_and_holiday <- rbind(
+      setting_and_holiday,
+      matr %>% mutate(locn = locn, winter_holiday = holiday_name)
+    )
+    
+  }
+}
+
+setting_and_holiday_w <- setting_and_holiday %>% 
+  pivot_wider(names_from = winter_holiday, values_from = value) %>% 
+  mutate(diff = winter_hols - all,
+         propdiff = diff/all) 
+
+setting_and_holiday_w %>% 
+  group_by(part_age, locn) %>% 
+  summarise(sum_all = sum(all),
+            sum_winter_hols = sum(winter_hols)) %>% 
+  mutate(overall_propdiff = 100*(sum_winter_hols - sum_all)/sum_all)
+
+#### PLOT ####
+max_value <- max(c(setting_and_holiday_w$all,
+                   setting_and_holiday_w$winter_hols))
+
+p_wh <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = winter_hols)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(winter_hols, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'Winter holidays') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  facet_wrap(locn ~ ., scales = 'free'); p_wh
+
+p_main <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = all)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(all, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Mean contacts',
+       title = 'Winter holidays') +
+  theme_lg() + scale_fill_viridis(limits = c(0,max_value)) +
+  facet_wrap(locn ~ ., scales = 'free'); p_main
+
+pdiff <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = diff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = round(diff, 2)), col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("blue"), mid = "white", 
+                                    high = muted("red")) +
+  facet_wrap(locn ~ ., scales = 'free'); pdiff
+
+pdiffprop <- setting_and_holiday_w %>% 
+  ggplot() + 
+  geom_tile(aes(x = part_age, y = cont_age, 
+                fill = propdiff)) +
+  geom_label(aes(x = part_age, y = cont_age,
+                 label = paste0(100*round(propdiff, 2),'%')), 
+             col = 'black', fill = 'white', alpha = 0.5) + 
+  labs(x = 'Participant age group', y = 'Contact age group', fill = 'Difference',
+       title = 'Percentage difference in mean contacts\n(positive = more in winter holidays)') +
+  theme_lg() + scale_fill_gradient2(low = muted("green"), mid = "white", 
+                                    high = muted("purple")) +
+  facet_wrap(locn ~ ., scales = 'free'); pdiffprop
+
+p_main + p_wh + 
+  pdiff + pdiffprop + plot_layout(nrow = 2)
+ggsave(file.path('output','figures','exploration','winter_mixing','holiday_contacts_locn.png'),
+       width = 22, height = 20)
+
+pdiffprop 
+ggsave(file.path('output','figures','exploration','winter_mixing','PROP_holiday_contacts_locn.png'),
+       width = 14, height = 13)
 
 #### SAVE HOLIDAY MATRIX ####
 write_rds(holiday_cm, .args[4])

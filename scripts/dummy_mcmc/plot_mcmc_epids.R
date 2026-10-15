@@ -348,7 +348,8 @@ rep_rates <- mcmc_samples_filtered_burned %>%
                  function(x, y) {
                    result <- imd_spline(c(x, y))
                    setNames(as.list(result), secondary_names)
-                 }) %>% bind_rows())
+                 }) %>% bind_rows()) %>% 
+  mutate(chain_it_id = paste0(chain, '_', iteration)) 
 
 age_risk_rates <- rep_rates %>% 
   select(contains('rate'), chain_it_id, epidemic) %>%
@@ -598,10 +599,12 @@ epids_subtype_agg_l[, modelled_proportion := value/total]
 setnames(epids_subtype_agg_l, 'variable', 'subtype')
 epids_subtype_agg_l[, c('total','value','chain_it_id') := NULL]
 
+l95 <- function(vec){quantile(vec, 0.025, na.rm = T)}; u95 <- function(vec){quantile(vec, 0.975, na.rm = T)}
+
 epids_subtype_m <- rbind(
   epids_subtype_agg_l[, lapply(.SD, median), by = c('date','subtype')][, measure := 'median'],
-  epids_subtype_agg_l[, lapply(.SD, max), by = c('date','subtype')][, measure := 'u'],
-  epids_subtype_agg_l[, lapply(.SD, min), by = c('date','subtype')][, measure := 'l'])
+  epids_subtype_agg_l[, lapply(.SD, u95), by = c('date','subtype')][, measure := 'u'],
+  epids_subtype_agg_l[, lapply(.SD, l95), by = c('date','subtype')][, measure := 'l'])
 
 epids_subtype_w <- dcast(epids_subtype_m,
                          date + subtype ~ measure, 
@@ -610,16 +613,15 @@ epids_subtype_w <- dcast(epids_subtype_m,
 ## true proportions
 true_proportions <- ukhsa_subtype_data %>% rename(date = date_formatted) %>% 
   select(date, subtype, proportion, season, total_tests) %>% 
-  group_by(date, season) %>% 
-  complete(subtype = unique(ukhsa_subtype_data$subtype), fill = list(proportion = NA,
-                                                                     total_tests = NA))
+  group_by(date, season, total_tests) %>% 
+  complete(subtype = unique(ukhsa_subtype_data$subtype), fill = list(proportion = 0))
 
 ## combine
 fitted_and_obs_proportions <- epids_subtype_w %>% 
   left_join(true_proportions, by = c('date','subtype')) 
 
 fitted_and_obs_proportions %>% 
-  filter(!is.na(season)) %>% 
+  filter(!is.na(season)) %>%
   ggplot() + 
   geom_ribbon(aes(date, ymin = l, ymax = u, fill = subtype), alpha = 0.3) +
   geom_line(aes(date, median, col = subtype, group = season), lwd = 0.8) +
@@ -631,7 +633,7 @@ fitted_and_obs_proportions %>%
   scale_x_date(breaks = "1 month", labels=date_format("%b\n%y")) +
   scale_color_manual(values = subtype_colors, labels = subtype_names) +
   scale_fill_manual(values = subtype_colors, labels = subtype_names) +
-  labs(y = 'Proportion of infections', col = '', fill = '', size = 'Total weekly\nUKHSA tests', x='')
+  labs(y = 'Proportion of infections (median and 95% CrI)', col = '', fill = '', size = 'Total weekly\nUKHSA tests', x='')
 
 ggsave(gsub('data/posterior_epidemics.rds',figure_filename('subtype_proportions'),.args[length(.args)]),
        width = 16, height = 8)
