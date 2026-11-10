@@ -86,7 +86,15 @@ colors_p_age_group_nhs <- c('0-4' = '#4d004b',
                            '70-79' = '#ef6548',
                            '80+' = '#990000')
 
-age_colors <- colors_p_age_group_nhs
+age_colors <- c('0-4' = '#4d004b',
+                '5-11' = '#ae017e', 
+                '12-17' = '#dd3497',
+                '18-29' = '#f768a1', 
+                '30-49' = '#fcc5c0',
+                '50-64' = '#fec44f',
+                '65-74' = '#fe9929',
+                '75-84' = '#ef6548',
+                '85+' = '#990000')
 
 colors_age_grp <- c('Aged 4 years and under' = '#4d004b', 'Aged 5 to 9 years' = '#7a0177',
                         'Aged 10 to 14 years' = '#ae017e', 'Aged 15 to 19 years' = '#dd3497',

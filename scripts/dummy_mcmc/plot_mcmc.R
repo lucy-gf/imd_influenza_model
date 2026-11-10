@@ -223,7 +223,7 @@ read_and_get_samples <- function(i){
   }
   
   # Code could have finished running in the days before
-  dates <- as.character(run_date - 0:4)
+  dates <- as.character(run_date - 0:6)
   
   # files in directory
   all_files <- list.files(path = gsub('mcmc_samples.rds',number_str,.args[8]))
@@ -241,6 +241,7 @@ read_and_get_samples <- function(i){
   # how many chain jobs for a given index
   chain_jobs <- suppressWarnings(unique(c(as.numeric(substr(date_files, 26, 26)),
                                           as.numeric(substr(date_files, 26, 27)))))
+  if(sum(grepl('CHAIN1_', date_files)) == 0){chain_jobs <- chain_jobs[chain_jobs != 1]}
   chain_jobs <- chain_jobs[!is.na(chain_jobs)]
   total_chains <- length(chain_jobs)
   
@@ -249,7 +250,7 @@ read_and_get_samples <- function(i){
   for(chain_job in chain_jobs){
     
     date_file <- date_files[grepl(paste0("CHAIN", chain_job, "_"), date_files)]
-    if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file, ')'))}
+    if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file[1], ')'))}
     
     dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str,'/',date_file),.args[8]))),
                     error = NA)
@@ -348,9 +349,9 @@ colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
 
 #### FILTER #### 
-burn_in <- 100000 #as.numeric(strsplit(number_str, split = '_')[[1]][1])
+burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
 thinning_value <- as.numeric(strsplit(number_str, split = '_')[[1]][2])
-n_samples <- as.numeric(strsplit(number_str, split = '_')[[1]][3]) #(max(mcmc_samples$iteration) - burn_in)/thinning_value
+n_samples <- (max(mcmc_samples$iteration) - burn_in)/thinning_value
 
 ## print acceptance rates
 for(epid in unique(mcmc_samples$epidemic)){
@@ -364,7 +365,8 @@ for(epid in unique(mcmc_samples$epidemic)){
 
 mcmc_samples_filtered <- if(save_all_flag){
   # reduce whole chain by thinning value
-  mcmc_samples[iteration %% thinning_value == 0,] 
+  mcmc_samples[iteration %% thinning_value == 0 &
+                 iteration >= burn_in,] 
 }else{
   copy(mcmc_samples)[, iteration := burn_in + iteration*thinning_value]
 }
@@ -375,11 +377,13 @@ unique_df <- unique(mcmc_samples_filtered[, ..posterior_cols])
 
 # if(save_all_flag){
   # only do every 100th unique row of mcmc_samples_filtered
-  Reff_filter <- 100
-  unique_df <- unique_df[Reff_filter*(1:(nrow(unique_df)/Reff_filter)),]
+  # Reff_filter <- 100
+  # unique_df <- unique_df[Reff_filter*(1:(nrow(unique_df)/Reff_filter)),]
 # }
 
 pb <- txtProgressBar(min = 1, max = nrow(unique_df), style = 3)
+
+RVACC <- c()
 
 for(i in 1:nrow(unique_df)){
   
@@ -392,6 +396,14 @@ for(i in 1:nrow(unique_df)){
                 inf_period = known_pars$epid_periods[2],
                 beta_in = row$transmissibility_epid_1,
                 cm_in = cm)
+  
+  RVACC <- c(RVACC, R0_func(susceptibility = fcn_assign_ages((1-0.248)*row$children_susceptibility_epid_1,
+                                           (1-0.14)*row$adults_susceptibility_epid_1,
+                                           (1-0.225)*row$older_adults_susceptibility_epid_1,
+                                           age_labels),
+          inf_period = known_pars$epid_periods[2],
+          beta_in = row$transmissibility_epid_1,
+          cm_in = cm))
   
   R2 <- R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
                                                  row$adults_susceptibility_epid_2,
@@ -408,16 +420,19 @@ for(i in 1:nrow(unique_df)){
                Reff_epid_1 := R1]
   
   mcmc_samples_filtered[transmissibility_epid_2 == row$transmissibility_epid_2 &
-                 children_susceptibility_epid_2 == row$children_susceptibility_epid_2 & 
+                 children_susceptibility_epid_2 == row$children_susceptibility_epid_2 &
                  adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
                  older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
                Reff_epid_2 := R2]
-  
+
   # Print progress
   setTxtProgressBar(pb, i)
   
 }
 close(pb)
+
+## approximate R after accounting for effective vaccination
+hist(RVACC)
 
 posterior_cols <- c(posterior_cols, 'Reff_epid_1', 'Reff_epid_2')
 plotting_cols <- unique(gsub('_epid_1|_epid_2', '', posterior_cols))
@@ -426,7 +441,9 @@ mcmc_samples_filtered_burned <- if(save_all_flag){
   ## filter past burn-in
   mcmc_samples_filtered[iteration > burn_in,]#[, iteration := 1:n_samples, .(chain, epidemic)]
 }else{
-  copy(mcmc_samples_filtered)
+  # copy(mcmc_samples_filtered)
+  # manually add 100,000 burn in
+  mcmc_samples_filtered[iteration > 1e5,]
 }
 
 #### PLOT TRACE #### 
@@ -452,6 +469,7 @@ ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.arg
 # patchwork::wrap_plots(densities, nrow = 6)
 # ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_densities'),.args[length(.args)]), width = 30, height = 14)
 
+if(F){
 ## PAIRWISE PLOTS
 message('Plotting pairwise correlations')
 mcmc_samples_filtered_burned[, chain_it_id := paste0(chain, '_', iteration)]
@@ -490,7 +508,7 @@ pairs_wide[,chain_it_id := NULL]
 p_FULL <- ggpairs(pairs_wide, columns = 2:ncol(pairs_wide), aes(color = as.factor(subtype_season), alpha = 0.5))
 ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_pairwise'),.args[length(.args)]),
        plot = p_FULL, width = 40, height = 40)
-
+}
 
 #### SAVE DATA ####
 

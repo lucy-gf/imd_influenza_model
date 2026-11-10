@@ -584,12 +584,21 @@ epids_subtype_agg_w <- dcast(epids_subtype_agg,
                              chain_it_id + date ~ subtype,
                              value.var = 'infections')
 
-# replace NA with 0
-epids_subtype_agg_w[is.na(AH1N1), AH1N1 := 0]
-epids_subtype_agg_w[is.na(AH3N2), AH3N2 := 0]
-epids_subtype_agg_w[is.na(B), B := 0]
+epids_subtype_agg_w[, total := 0]
 
-epids_subtype_agg_w[, total := AH1N1 + AH3N2 + B]
+# replace NA with 0
+if('AH1N1' %in% colnames(epids_subtype_agg_w)){
+  epids_subtype_agg_w[is.na(AH1N1), AH1N1 := 0]
+  epids_subtype_agg_w[, total := total + AH1N1]
+}
+if('AH3N2' %in% colnames(epids_subtype_agg_w)){
+  epids_subtype_agg_w[is.na(AH3N2), AH3N2 := 0]
+  epids_subtype_agg_w[, total := total + AH3N2]
+}
+if('B' %in% colnames(epids_subtype_agg_w)){
+  epids_subtype_agg_w[is.na(B), B := 0]
+  epids_subtype_agg_w[, total := total + B]
+}
 
 epids_subtype_agg_l <- melt(epids_subtype_agg_w,
                             id.vars = c('chain_it_id','date','total'))
@@ -713,6 +722,14 @@ fitted_secondary_plot <- fitted_surv_agg %>%
   scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
   labs(y = 'primary care', x = ''); fitted_secondary_plot
 
+## SAVE PNGs
+fitted_primary_plot
+ggsave(gsub('data/posterior_epidemics.rds',figure_filename('primary_data'),.args[length(.args)]),
+       width = 16, height = 12)
+fitted_secondary_plot
+ggsave(gsub('data/posterior_epidemics.rds',figure_filename('secondary_data'),.args[length(.args)]),
+       width = 16, height = 12)
+
 fitted_surv_agg %>%
   select(!observed_primary) %>% 
   filter(imd_quintile %in% c("IMD 1", "IMD 3"), age_grp == '5-11') %>% 
@@ -735,7 +752,7 @@ ggsave(gsub('data/posterior_epidemics.rds',figure_filename('example_kid_secondar
 
 fitted_surv_agg %>%
   select(!observed_secondary) %>% 
-  filter(imd_quintile == 'IMD 1', age_grp == '5-11') %>% 
+  filter(imd_quintile == 'IMD 1', age_grp == '5-11') %>%
   pivot_wider(names_from = measure, values_from = observed_primary) %>% 
   ggplot() + 
   geom_ribbon(aes(date, ymin=l, ymax=u, group=interaction(age_grp,risk_level), fill=risk_level), 
@@ -747,12 +764,3 @@ fitted_surv_agg %>%
   theme(text = element_text(size=12)) +
   scale_x_date(breaks = "1 year", labels=date_format("%Y")) +
   labs(y = 'Primary care', x = '', col = 'Clinical risk', fill = 'Clinical risk')
-
-## SAVE PNGs
-fitted_primary_plot
-ggsave(gsub('data/posterior_epidemics.rds',figure_filename('primary_data'),.args[length(.args)]),
-       width = 16, height = 12)
-fitted_secondary_plot
-ggsave(gsub('data/posterior_epidemics.rds',figure_filename('secondary_data'),.args[length(.args)]),
-       width = 16, height = 12)
-

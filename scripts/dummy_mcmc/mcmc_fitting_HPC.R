@@ -17,7 +17,7 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "dummy_data", "known_parameters.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
 
-bash_args <- if (interactive()) c(1, 5) else as.numeric(commandArgs(trailingOnly = TRUE))
+bash_args <- if (interactive()) c(3, 1) else as.numeric(commandArgs(trailingOnly = TRUE))
 
 i <- bash_args[1]
 chain <- bash_args[2]
@@ -154,9 +154,14 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 ## MCMC pars
 burn_in <- 0
 thinning_value <- 100
-n_samples <- 2500
+n_samples <- 3000
 
 number_string <- paste0(burn_in,'_',thinning_value,'_',n_samples)
+
+# make output folder
+if(!file.exists(paste0('output/data/',number_string))){
+  dir.create(paste0('output/data/',number_string))
+}
 
 cat('\n Total steps: ', burn_in + thinning_value*n_samples, ' (', 
     number_string, ')\n', sep = '')
@@ -169,11 +174,36 @@ save_all_flag <- F
 # cat('\nn_cores: ', n_cores, '\n')
 
 # if in 2025/26, only using one set of epidemiological parameters (else using 2)
+# (subtype-specific parameters x2, IMD spline parameters x4)
 initial_parameters_in <- if(i == 3){
-  c(subtype_init_pars,rep(0, 4))
+  matrix(c(subtype_init_pars,rep(0, 4)), nrow=1)
 }else{
-  c(subtype_init_pars,subtype_init_pars,rep(0, 4))
+  matrix(c(subtype_init_pars,subtype_init_pars,rep(0, 4)), nrow=1)
 }
+
+PREVIOUS_PARS <- T
+
+if(PREVIOUS_PARS){
+  # load in previous parameters 
+  previous_run <- readRDS(.args[6])
+  previous_par_files <- list.files(paste0("output/data/",previous_run$x))
+  previous_par_files_filt <- previous_par_files[grepl(paste0('INDEX',i,'_CHAIN',chain,'_'),previous_par_files)]
+  previous_pars <- readRDS(file.path('output','data',previous_run$x,previous_par_files_filt))
+  
+  parameters_vec <- if(i==3){21}else{38}
+  
+  # make the end of the last run into the initial inputs for this run
+  initial_parameters_in <- matrix(
+    c(previous_pars[[1]][nrow(previous_pars[[1]]),1:parameters_vec],
+      previous_pars[[2]][nrow(previous_pars[[2]]),1:parameters_vec],
+      previous_pars[[3]][nrow(previous_pars[[3]]),1:parameters_vec]),
+    nrow = parameters_vec)
+  
+  initial_parameters_in <- t(initial_parameters_in)
+  
+}
+
+## RUN MCMC
 
 mcmc_results <- run_mcmc_inference(
   demography_input = demography,
@@ -185,14 +215,20 @@ mcmc_results <- run_mcmc_inference(
   coverage_rates = known_pars$proportion_observed,
   care_delays = delays,
   initial_parameters = initial_parameters_in,
-  #   subtype-specific parameters x2, IMD spline parameters x4
   save_all = save_all_flag,
   n_samples = n_samples,
   nburn = burn_in,
   thinning = thinning_value,
   n_chains = 1,
-  txt_output = paste0(i, '_', chain)
+  txt_output = paste0(i, '_', chain),
+  manual_print_mod = 1000
 )
+
+# code to compare calculated log-likelihood to attached log-likelihood
+# for(i in 1:length(mcmc_results)){
+#   t <- llikelihood(mcmc_results[[i]][,1:21]) - mcmc_results[[i]][,23]
+#   if(any(t != 0)){cat(i)}
+# }
 
 #### SAVE ####
 
@@ -200,7 +236,12 @@ mcmc_results <- run_mcmc_inference(
 write_rds(data.table(x=number_string,
                      HPC = T,
                      save_all = save_all_flag,
-                     date = Sys.Date()), .args[6])
+                     date = Sys.Date(),
+                     using_previous_pars = PREVIOUS_PARS,
+                     previous_pars = if(PREVIOUS_PARS){previous_run$x}else{NULL},
+                     previous_pars_date = if(PREVIOUS_PARS){previous_run$date}else{NULL},
+                     previous_pars_save_all = if(PREVIOUS_PARS){previous_run$save_all}else{NULL}
+                     ), .args[6])
 
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',

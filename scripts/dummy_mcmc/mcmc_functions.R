@@ -21,7 +21,8 @@ run_mcmc_inference <- function(
     thinning,
     n_chains,
     n_cores = 1,
-    txt_output = NULL
+    txt_output = NULL,
+    manual_print_mod = NULL
 ) {
   
   ## SET UP DATA FRAMES ETC. ##
@@ -32,16 +33,22 @@ run_mcmc_inference <- function(
   epidemic_dt <- as.data.table(epidemic_to_fit)
   coverage_rates$imd_quintile <- factor(coverage_rates$imd_quintile)
   n_subtypes <- n_distinct(subtype_season$subtype)
-  n_pars_per_subtype <- (length(initial_parameters) - 4)/n_subtypes
+  length_n_pars <- if(!is.null(nrow(initial_parameters))){ncol(initial_parameters)}else{
+    length(initial_parameters)
+  }
+  n_pars_per_subtype <- (length_n_pars - 4)/n_subtypes
   
   # DEzs sampler will require 3 chains
   n_pop_internal <- 3
     
   ll_call_count <- 0
   ll_total_calls <- nburn + n_samples*thinning
-  mod_val <- if (ll_total_calls < 100) 10 else if (ll_total_calls < 2000) 100 else 1000
+  mod_val <- if(!is.null(manual_print_mod)){manual_print_mod}else{
+    if (ll_total_calls < 100) 10 else if (ll_total_calls < 2000) 100 else 1000
+  }
   
   txt_out <- file.path('mcmc_output',paste0('index_',txt_output,'.txt'))
+  pars_out <- file.path('mcmc_output',paste0('pars_index_',txt_output,'.rds'))
   
   LLcache <- new.env(hash = TRUE, parent = emptyenv())
   
@@ -176,7 +183,7 @@ run_mcmc_inference <- function(
       
       run_A_shorter <- F
       t_end_in <- if(run_A_shorter){
-        ifelse(epid_subtype == 'B', 300, 250)
+        if(epid_subtype == 'B'){300}else{250}
       }else{300}
       
       time_series <- run_model(
@@ -392,10 +399,12 @@ run_mcmc_inference <- function(
       writeLines(sprintf(
         "INDEX %s: Generation %d / %d (%.1f%%) | Elapsed: %.1f min \n 
         Est. remaining: %.1f min | Time per 1000 iterations: %.1f min \n  
-        Last updated: %s",
+        Last updated: %s | Log-likelihood: %f",
         txt_output, ll_call_count, ll_total_calls,
-        100 * ll_call_count / ll_total_calls, elapsed, remaining, 1000 / rate, as.character(now_time)
+        100 * ll_call_count / ll_total_calls, elapsed, remaining, 1000 / rate, 
+        as.character(now_time), llikelihood(pars)
       ), txt_out)
+      write_rds(pars, pars_out)
     }
     
     if (is.matrix(pars)) {
@@ -436,6 +445,8 @@ run_mcmc_inference <- function(
     reporting_prim_vec_1 <- c(6:11)
     reporting_sec_vec_1 <- reporting_vec_1[reporting_vec_1 %notin% reporting_prim_vec_1]
     
+    imd_reporting_pars <- pars[1:4 + n_subtypes*n_pars_per_subtype] 
+    
     if(
       
       ## TRANSMISSIBILITY
@@ -449,6 +460,9 @@ run_mcmc_inference <- function(
       
       ## REPORTING
       any(pars[reporting_vec_1] < min_reporting) || any(pars[reporting_vec_1] > max_reporting) ||
+      
+      ## IMD-SPECIFIC REPORTING
+      any(pars[reporting_vec_1]*exp(max(imd_reporting_pars)) > max_reporting) ||
       
       R0_1 < min_r0 || R0_1 > max_r0 
       
@@ -489,6 +503,9 @@ run_mcmc_inference <- function(
         ## REPORTING
         any(pars[reporting_vec_2] < min_reporting) || any(pars[reporting_vec_2] > max_reporting) ||
         
+        ## IMD-SPECIFIC REPORTING
+        any(pars[reporting_vec_2]*exp(max(imd_reporting_pars)) > max_reporting) ||
+        
         R0_2 < min_r0 || R0_2 > max_r0 
         
       ) {return(-Inf)}
@@ -496,7 +513,7 @@ run_mcmc_inference <- function(
     }
     
     ## IMD SPLINES
-    if(any(pars[1:4 + n_subtypes*n_pars_per_subtype] < min_spline) || any(pars[1:4 + n_subtypes*n_pars_per_subtype] > max_spline)){return(-Inf)}
+    if(any(imd_reporting_pars < min_spline) || any(imd_reporting_pars > max_spline)){return(-Inf)}
     
     lprob <- 0
     
@@ -556,7 +573,7 @@ run_mcmc_inference <- function(
   # set up priors and lower/upper bounds
   {
   # IGPR and IHR centred roughly around the crude estimates (based on attack rate etc.)
-  prim_beta  <- beta_pars(initial_parameters[6], 200) 
+  prim_beta  <- beta_pars(initial_parameters[6], 200)
   sec_beta   <- beta_pars(initial_parameters[12], 200)
   # Susceptibility beta distributed, mean at 0.5
   shape1_susc <- 2
@@ -592,7 +609,12 @@ run_mcmc_inference <- function(
   }
   
   sampler <- function(n = 1){
-    out <- matrix(NA, nrow = n, ncol = length(initial_parameters))
+    ncol_out <- if(is.null(ncol(initial_parameters))){
+      length(initial_parameters)
+      }else{
+      ncol(initial_parameters)
+    }
+    out <- matrix(NA, nrow = n, ncol = ncol_out)
     for(j in 1:n){
       repeat {
       valid <- FALSE
@@ -674,9 +696,15 @@ run_mcmc_inference <- function(
       prim_rates_1 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
       sec_rates_1  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
       
+      # check imd-specific reporting rates 
+      if(any(c(prim_rates_1, sec_rates_1)*exp(max(imd_spline_samples)) > max_reporting)) next
+      
       if(n_subtypes == 2){
         prim_rates_2 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
         sec_rates_2  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+        
+        # check imd-specific reporting rates 
+        if(any(c(prim_rates_2, sec_rates_2)*exp(max(imd_spline_samples)) > max_reporting)) next
       }
       
       out[j, ] <- if(n_subtypes == 2){
@@ -727,7 +755,7 @@ run_mcmc_inference <- function(
     thin = 1,
     message = F,
     nrChains = n_chains,
-    startValue = prior$sampler(n_pop_internal)
+    startValue = initial_parameters #prior$sampler(n_pop_internal)
   )
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
@@ -755,7 +783,7 @@ run_mcmc_inference <- function(
   for(sample in 1:length(samp)){
     
     samp[[sample]] <- cbind(samp[[sample]], 
-                            LLcomponents[[sample]][nburn + thinning*(1:n_samples), c('LP','LL','LPr','LL1','LL2','LL3')])
+                            LLcomponents[[sample]][nburn + thinning*(0:(n_samples-1)) + 1, c('LP','LL','LPr','LL1','LL2','LL3')])
     
   }
   
@@ -916,7 +944,7 @@ plot_trace <- function(var, filtered = F){
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
-        filter(iteration > max(iteration)/4) %>% 
+        filter(iteration > max(iteration)/2) %>% 
         ggplot() +
         geom_hline(yintercept = 0, lty=2) +
         facet_grid(.~season, scales = 'free') +
