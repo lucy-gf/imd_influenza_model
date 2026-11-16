@@ -105,7 +105,7 @@ subtype_seasons <- ukhsa_subtype_data %>%
 true_infections_list <- readRDS(.args[4])
 
 #### SURVEILLANCE DATA #### 
-surveillance_data <- readRDS(.args[5])
+surveillance_data <- readRDS(.args[5])[[1]]
 if(nrow(surveillance_data) != nrow(unique(surveillance_data %>% ungroup() %>% 
                                           select(age_grp, imd_quintile, risk_level, week_start)))){
   warning('Surveillance data wrongly indexed')
@@ -119,68 +119,7 @@ years <- known_pars$years
 unknown_pars <- readRDS(.args[7])
 
 ## true epid parameters being fitted
-epid_pars <- data.frame()
-for(i in 1:nrow(subtype_seasons)){
-  
-  up_ss <- unknown_pars$epid_parameters %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  up_care_base_ss <- unknown_pars$base_care_rates %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  up_imd_spline_ss <- unknown_pars$imd_spline_pars %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  
-  epid_pars <- rbind(epid_pars,
-    data.frame(epidemic = subtype_seasons$epidemic[i],
-               season = subtype_seasons$season[i],
-               subtype = subtype_seasons$subtype[i],
-               year = subtype_seasons$year[i],
-               transmissibility = up_ss$transmissibility,
-               children_susceptibility = up_ss$children_susceptibility,
-               adults_susceptibility = up_ss$adults_susceptibility,
-               older_adults_susceptibility = up_ss$older_adults_susceptibility,
-               init_infected = log10(up_ss$init_infected),
-               primary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$gp_rate,
-               primary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$gp_rate,
-               primary_care_rate_older_adults_low = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'low'))$gp_rate,
-               primary_care_rate_children_high = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'high'))$gp_rate,
-               primary_care_rate_adults_high = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'high'))$gp_rate,
-               primary_care_rate_older_adults_high = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'high'))$gp_rate,
-               secondary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$hosp_rate,
-               secondary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$hosp_rate,
-               secondary_care_rate_older_adults_low = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'low'))$hosp_rate,
-               secondary_care_rate_children_high = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'high'))$hosp_rate,
-               secondary_care_rate_adults_high = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'high'))$hosp_rate,
-               secondary_care_rate_older_adults_high = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'high'))$hosp_rate,
-               imd_spline_primary_1 = up_imd_spline_ss$primary[1],
-               imd_spline_primary_2 = up_imd_spline_ss$primary[2],
-               imd_spline_secondary_1 = up_imd_spline_ss$secondary[1],
-               imd_spline_secondary_2 = up_imd_spline_ss$secondary[2],
-               Reff = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
-                                                             up_ss$adults_susceptibility,
-                                                             up_ss$older_adults_susceptibility,
-                                                             age_labels),
-                            inf_period = known_pars$epid_periods[2],
-                            beta_in = up_ss$transmissibility,
-                            cm_in = cm)
-    ))
-}
-
-epid_pars <- epid_pars %>% pivot_longer(!c(epidemic,subtype,season,year)) 
-
-epid_pars <- epid_pars %>% 
-  left_join(subtype_seasons, by = c('epidemic','season','subtype','year')) %>% 
-  mutate(par_name = case_when(
-    grepl('imd_spline', name) ~ paste0(name, '_', year),
-    T ~ paste0(name, '_', year, '_', subtype)),
-    joining_name =  case_when(
-      grepl('imd_spline', name) ~ name,
-      T ~ paste0(name, '_epid_', epidemic_of_season)))
+epid_pars <- readRDS(.args[8])
 
 #### MCMC SAMPLES #### 
 get_samples <- function(i){
@@ -228,7 +167,7 @@ read_and_get_samples <- function(i,
   dates <- as.character(run_date_in - 0:6)
   
   # files in directory
-  all_files <- list.files(path = gsub('mcmc_samples.rds',number_str_in,.args[8]))
+  all_files <- list.files(path = gsub('mcmc_samples.rds',number_str_in,.args[9]))
   
   # files finishing on relevant dates
   date_files <- c()
@@ -254,12 +193,12 @@ read_and_get_samples <- function(i,
     date_file <- date_files[grepl(paste0("CHAIN", chain_job, "_"), date_files)]
     if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file[1], ')'))}
     
-    dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[8]))),
+    dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[9]))),
                     error = NA)
     
     if(length(dat) == 1){
       if(is.na(dat)){
-        dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[8]))))
+        dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[9]))))
       }
     }
     
@@ -282,7 +221,7 @@ read_and_get_samples <- function(i,
 }
 
 # load most recently run settings (burn in, thinning, samples)
-output_details_file <- readRDS(.args[8])
+output_details_file <- readRDS(.args[9])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 save_all_flag <- output_details_file$save_all
@@ -338,7 +277,7 @@ if(WAS_HPC){
   
   number_date_str <- paste0(number_str, '_', run_date)
   
-  mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_date_str,'.rds'),.args[8]))
+  mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_date_str,'.rds'),.args[9]))
   mcmc_samples <- rbindlist(lapply(1:3, get_samples))
   mcmc_samples[, c('Lposterior','Lprior') := NULL]
   

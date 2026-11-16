@@ -21,6 +21,7 @@ options(dplyr.summarise.inform = FALSE)
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
     file.path("data", "dummy_data", "unknown_parameters.rds"),
+    file.path("data", "dummy_data", "mcmc_true_values.rds"),
     file.path("output", "data", "mcmc_posteriors.rds"),
     file.path("output", "data", "posterior_epidemics.rds")
   ) #else commandArgs(trailingOnly = TRUE)
@@ -105,11 +106,13 @@ subtype_seasons <- ukhsa_subtype_data %>%
 true_infections_list <- readRDS(.args[4])
 
 #### SURVEILLANCE DATA #### 
-surveillance_data <- readRDS(.args[5])
+surveillance_data_list <- readRDS(.args[5])
+surveillance_data <- surveillance_data_list[[1]]
 if(nrow(surveillance_data) != nrow(unique(surveillance_data %>% ungroup() %>% 
                                           select(age_grp, imd_quintile, risk_level, week_start)))){
   warning('Surveillance data wrongly indexed')
 }
+surveillance_data_subtype <- surveillance_data_list[[2]]
 
 #### KNOWN PARAMETERS #### 
 known_pars <- readRDS(.args[6])
@@ -134,74 +137,23 @@ if(!all.equal(sum(demography$population), tot_pop)){warning('pop not adding up')
 unknown_pars <- readRDS(.args[7])
 
 ## true epid parameters being fitted
-epid_pars <- data.frame()
-for(i in 1:nrow(subtype_seasons)){
-  
-  up_ss <- unknown_pars$epid_parameters %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  up_care_base_ss <- unknown_pars$base_care_rates %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  up_imd_spline_ss <- unknown_pars$imd_spline_pars %>% filter(
-    subtype == subtype_seasons$subtype[i],
-    year == subtype_seasons$year[i]
-  )
-  
-  epid_pars <- rbind(epid_pars,
-                     data.frame(epidemic = subtype_seasons$epidemic[i],
-                                season = subtype_seasons$season[i],
-                                subtype = subtype_seasons$subtype[i],
-                                year = subtype_seasons$year[i],
-                                transmissibility = up_ss$transmissibility,
-                                children_susceptibility = up_ss$children_susceptibility,
-                                adults_susceptibility = up_ss$adults_susceptibility,
-                                older_adults_susceptibility = up_ss$older_adults_susceptibility,
-                                init_infected = log10(up_ss$init_infected),
-                                primary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$gp_rate,
-                                primary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$gp_rate,
-                                primary_care_rate_older_adults_low = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'low'))$gp_rate,
-                                primary_care_rate_children_high = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'high'))$gp_rate,
-                                primary_care_rate_adults_high = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'high'))$gp_rate,
-                                primary_care_rate_older_adults_high = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'high'))$gp_rate,
-                                secondary_care_rate_children_low = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'low'))$hosp_rate,
-                                secondary_care_rate_adults_low = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'low'))$hosp_rate,
-                                secondary_care_rate_older_adults_low = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'low'))$hosp_rate,
-                                secondary_care_rate_children_high = (up_care_base_ss %>% filter(broad_age == 'children', risk_level == 'high'))$hosp_rate,
-                                secondary_care_rate_adults_high = (up_care_base_ss %>% filter(broad_age == 'adults', risk_level == 'high'))$hosp_rate,
-                                secondary_care_rate_older_adults_high = (up_care_base_ss %>% filter(broad_age == 'older_adults', risk_level == 'high'))$hosp_rate,
-                                imd_spline_primary_1 = up_imd_spline_ss$primary[1],
-                                imd_spline_primary_2 = up_imd_spline_ss$primary[2],
-                                imd_spline_secondary_1 = up_imd_spline_ss$secondary[1],
-                                imd_spline_secondary_2 = up_imd_spline_ss$secondary[2],
-                                Reff = R0_func(susceptibility = fcn_assign_ages(up_ss$children_susceptibility,
-                                                                                up_ss$adults_susceptibility,
-                                                                                up_ss$older_adults_susceptibility,
-                                                                                age_labels),
-                                               inf_period = known_pars$epid_periods[2],
-                                               beta_in = up_ss$transmissibility,
-                                               cm_in = cm)
-                     ))
-}
+epid_pars <- readRDS(.args[8])
 
-epid_pars <- epid_pars %>% pivot_longer(!c(epidemic,subtype,season,year)) 
-epid_pars <- epid_pars %>% 
-  left_join(subtype_seasons, by = c('epidemic','season','subtype','year')) %>% 
-  mutate(par_name = case_when(
-      grepl('imd_spline', name) ~ paste0(name, '_', year),
-      T ~ paste0(name, '_', year, '_', subtype)),
-    joining_name =  case_when(
-      grepl('imd_spline', name) ~ name,
-      T ~ paste0(name, '_epid_', epidemic_of_season)),
-    subtype = case_when(
-      grepl('imd_spline', name) ~ NA, 
-      T ~ subtype),
-    epidemic_of_season = case_when(
-      grepl('imd_spline', name) ~ NA, 
-      T ~ epidemic_of_season)
-    ) %>% unique()
+# epid_pars <- epid_pars %>% 
+#   left_join(subtype_seasons, by = c('epidemic','season','subtype','year')) %>% 
+#   mutate(par_name = case_when(
+#       grepl('imd_spline', name) ~ paste0(name, '_', year),
+#       T ~ paste0(name, '_', year, '_', subtype)),
+#     joining_name =  case_when(
+#       grepl('imd_spline', name) ~ name,
+#       T ~ paste0(name, '_epid_', epidemic_of_season)),
+#     subtype = case_when(
+#       grepl('imd_spline', name) ~ NA, 
+#       T ~ subtype),
+#     epidemic_of_season = case_when(
+#       grepl('imd_spline', name) ~ NA, 
+#       T ~ epidemic_of_season)
+#     ) %>% unique()
 
 # data frame helpful for merging parameters later
 par_name_df <- epid_pars %>% 
@@ -210,7 +162,7 @@ par_name_df <- epid_pars %>%
 
 #### LOAD IN MCMC POSTERIOR DATA ####
 
-mcmc_samples_filtered_burned <- data.table(readRDS(.args[8]))
+mcmc_samples_filtered_burned <- data.table(readRDS(.args[9]))
 
 ## manual burn in 
 mcmc_samples_filtered_burned <- mcmc_samples_filtered_burned[iteration >= 0.8*max(iteration)]
@@ -683,10 +635,10 @@ epids_subtype_w <- dcast(epids_subtype_m,
                          value.var = 'modelled_proportion')
 
 ## true proportions
-true_proportions <- ukhsa_subtype_data %>% rename(date = date_formatted) %>% 
+true_proportions <- surveillance_data_subtype %>% rename(date = date_formatted) %>% 
   select(date, subtype, proportion, season, total_tests) %>% 
   group_by(date, season, total_tests) %>% 
-  complete(subtype = unique(ukhsa_subtype_data$subtype), fill = list(proportion = 0))
+  complete(subtype = unique(surveillance_data_subtype$subtype), fill = list(proportion = 0))
 
 ## combine
 fitted_and_obs_proportions <- epids_subtype_w %>% 

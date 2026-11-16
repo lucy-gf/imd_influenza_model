@@ -3,7 +3,7 @@
 
 default: localdef
 
-localdef: all_dummy
+localdef: all_pars all_dummy
 
 ###### SUPPORT DEFINITIONS #####################################################
 
@@ -58,7 +58,10 @@ ${DUMMYDAT}/known_parameters.rds: ${DUMMYDIR}/produce_known_parameters.R ${INPUT
 ${DUMMYDAT}/unknown_parameters.rds: ${DUMMYDIR}/produce_unknown_parameters.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/subtype_years.rds
 	$(call R)
 
-all_pars: ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
+${DUMMYDAT}/mcmc_true_values.rds: ${DUMMYDIR}/mcmc_true_values.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds ${INPUTDIR}/subtype_years.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
+	$(call R)
+
+all_pars: ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds ${DUMMYDAT}/mcmc_true_values.rds
 
 ##### DUMMY DATA ###################################################################
 

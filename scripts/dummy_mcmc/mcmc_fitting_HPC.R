@@ -31,6 +31,7 @@ source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
 #### LOAD DATA ####
 
+{
 ## read in population data
 imd_age_pop_reg <- readRDS(.args[1])
 age_labels <- unique(imd_age_pop_reg$age_grp)
@@ -90,6 +91,7 @@ ng <- nrow(per_cap_matrix_45)
 ndim <- nrow(pc_cm)
 if(!all.equal(2*ng, ndim)){warning('dimensions not adding up')}
 if(!all.equal(2*nimd*nage, ndim)){warning('dimensions not adding up')}
+}
 
 ## SURVEILLANCE DATA
 surveillance_data <- readRDS(.args[3])[[1]]
@@ -141,10 +143,70 @@ est_health_ratios <- surveillance_data %>% filter(index == i) %>%
   summarise(prim = sum(primary/(pop*est_attack_rate)),
             sec = sum(secondary/(pop*est_attack_rate)))
 
-subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5, 
-                       rep(est_health_ratios$prim[1], 6), rep(est_health_ratios$sec[1], 6))
+#### PARAMETERS TO FIT ####
+
+TWO_SUBTYPES <- (i != 3)
+
+## Should high-risk IGPR and IHR be fixed in relation to low-risk?
+RISK_RATIOS_FIXED <- T
+# if true, only 3 parameters to fit for each
+N_IGPR_VARS <- N_IHR_VARS <- ifelse(RISK_RATIOS_FIXED, 3, 6)
+
+# not necessarily all parameters have to be fitted in the MCMC
+# (will be fixed at true values if not being fitted)
+
+subtype_parameter_names <- c('transmissibility',
+                             'children_susceptibility','adult_susceptibility','older_adults_susceptibility',
+                             'init_infected',
+                             'primary_care_rate_children_low','primary_care_rate_adults_low','primary_care_rate_older_adults_low',
+                             'secondary_care_rate_children_low','secondary_care_rate_adults_low','secondary_care_rate_older_adults_low')
+
+trans_fit <- T # transmissibility
+susc_fit <- T # susceptibility (x3)
+init_fit <- F # initial infected
+primary_fit <- T # IGPRs (x3)
+secondary_fit <- T # IHRs (x3)
+imd_spline_fit <- T # IMD splines (x4)
+
+subtype_pars_to_fit <- c(trans_fit,
+                         rep(susc_fit, 3),
+                         init_fit,
+                         rep(primary_fit, N_IGPR_VARS),
+                         rep(secondary_fit, N_IHR_VARS))
+
+pars_to_fit <- subtype_pars_to_fit
+names_pars_to_fit <- subtype_parameter_names
+
+if(TWO_SUBTYPES){
+  pars_to_fit <- c(pars_to_fit, subtype_pars_to_fit)
+  names_pars_to_fit <- c(names_pars_to_fit,subtype_parameter_names)
+}
+
+pars_to_fit <- c(pars_to_fit, rep(imd_spline_fit, 4))
+names_pars_to_fit <- c(names_pars_to_fit, c('imd_spline_primary_1','imd_spline_primary_2','imd_spline_secondary_1','imd_spline_secondary_2'))
+names(pars_to_fit) <- names_pars_to_fit
+
+#### INITIAL VALUES ####
+
 # c(transmissibility, 3x absolute susceptibility, log of initial infected, 
 #   reporting rates for primary care, reporting rates for secondary care)
+subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5, 
+                       rep(est_health_ratios$prim[1], N_IGPR_VARS), rep(est_health_ratios$sec[1], N_IHR_VARS))
+
+# filter to only those being fitted in this analysis 
+subtype_init_pars <- subtype_init_pars[subtype_pars_to_fit]
+
+# if in 2025/26, only using one set of epidemiological parameters (else using 2)
+# (subtype-specific parameters x2, IMD spline parameters x4)
+
+initial_parameters_vec <- subtype_init_pars
+if(TWO_SUBTYPES){initial_parameters_vec <- c(initial_parameters_vec, subtype_init_pars)}
+if(imd_spline_fit){initial_parameters_vec <- c(initial_parameters_vec, rep(0,4))}
+
+initial_parameters_in <- matrix(initial_parameters_vec, nrow=1)
+
+# check right number of columns
+if(ncol(initial_parameters_in) != sum(pars_to_fit)){stop('initial_parameters_in wrong column count')}
 
 #### RUNNING MCMC ####
 
@@ -166,17 +228,10 @@ cat('\n Total steps: ', burn_in + thinning_value*n_samples, ' (',
 # save all steps, or only those after burn in and thinning?
 save_all_flag <- F
 
+## OLD CODE FOR USING N_CORES > 1
 # n_cores <- as.numeric(Sys.getenv("SLURM_CPUS_PER_TASK"))  
-# if (is.na(n_cores) || n_cores < 1) n_cores <- 1            # safe fallback if run outside SLURM
+# if (is.na(n_cores) || n_cores < 1) n_cores <- 1 # safe fallback if run outside SLURM
 # cat('\nn_cores: ', n_cores, '\n')
-
-# if in 2025/26, only using one set of epidemiological parameters (else using 2)
-# (subtype-specific parameters x2, IMD spline parameters x4)
-initial_parameters_in <- if(i == 3){
-  matrix(c(subtype_init_pars,rep(0, 4)), nrow=1)
-}else{
-  matrix(c(subtype_init_pars,subtype_init_pars,rep(0, 4)), nrow=1)
-}
 
 PREVIOUS_PARS <- F
 
@@ -187,7 +242,7 @@ if(PREVIOUS_PARS){
   previous_par_files_filt <- previous_par_files[grepl(paste0('INDEX',i,'_CHAIN',chain,'_'),previous_par_files)]
   previous_pars <- readRDS(file.path('output','data',previous_run$x,previous_par_files_filt))
   
-  parameters_vec <- if(i==3){21}else{38}
+  parameters_vec <- if(TWO_SUBTYPES){38}else{21} # TODO Fix when merging with not all parameters being fitted
   
   # make the end of the last run into the initial inputs for this run
   initial_parameters_in <- matrix(
