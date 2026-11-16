@@ -462,7 +462,7 @@ fitted_epidemics[, date := start_of_epidemic + t] ## add date
 fitted_epidemics[, c('t','start_of_epidemic') := NULL]
 
 ## OPTIONAL:
-## attack rate by risk group for each bootstrap 
+## weekly attack rate by risk group for each bootstrap 
 if(F){
   ar_vars <- c('age_grp','imd_quintile','risk_level')
   

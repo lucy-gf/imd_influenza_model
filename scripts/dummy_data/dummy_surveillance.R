@@ -13,6 +13,7 @@ options(dplyr.summarise.inform = FALSE)
   file.path("data", "dummy_data", "dummy_infections.rds"),
   file.path("data", "dummy_data", "known_parameters.rds"),
   file.path("data", "dummy_data", "unknown_parameters.rds"),
+  file.path("data", "inputs", "subtype_years.rds"),
   file.path("data", "dummy_data", "dummy_surveillance.rds")
 ) else commandArgs(trailingOnly = TRUE)
 
@@ -44,6 +45,11 @@ opensafely_coverage <- known_pars$proportion_observed
 ## UNKNOWN PARAMETERS
 unknown_pars <- readRDS(.args[3])
 
+## Add simulated UKHSA subtype testing data
+## EXISTING UKHSA DATA
+subtype_seasons <- readRDS(.args[4])
+simulated_subtype_seasons <- data.table()
+
 #### SAMPLE SURVEILLANCE DATA ####
 
 full_df <- data.frame()
@@ -54,6 +60,7 @@ for(k in 1:length(infections)){
   
   SS_i <- names(infections)[k]
   year_i <- as.numeric(substr(SS_i, 1, 4))
+  season_i <- paste0(year_i, '/', year_i + 1 - 2000)
   subtype_i <- gsub(year_i, '', gsub(' |\\(|\\)', '', SS_i))
   
   cat(SS_i, ', ', sep = '')
@@ -155,6 +162,26 @@ for(k in 1:length(infections)){
   
   full_df <- rbind(full_df,
                    infections_filtered)
+  
+  ## simulated flu test data
+  subtype_seasons_i <- subtype_seasons %>% filter(season == season_i, subtype == subtype_i) %>% 
+    select(season, date_formatted, week, total_tests, total_flu, subtype, value)
+  
+  national_population <- sum(known_pars$vaccinated_data[start_of_season == year_i & subtype == subtype_i,]$pop)
+  if(national_population < 50e6 | national_population > 70e6){stop('National population count wrong!')}
+  
+  subtype_seasons_i <- subtype_seasons_i %>% 
+    left_join(infections[[k]] %>% 
+                mutate(date_formatted = last_monday(start_date + t)) %>% 
+                group_by(date_formatted) %>% 
+                summarise(infections = sum(infections)) %>% 
+                mutate(total_population = national_population) %>% 
+                mutate(new_weekly_infections = infections/total_population) %>% 
+                mutate(proportion_infected = new_weekly_infections*known_pars$epid_periods[2]/7) %>% 
+                select(date_formatted, proportion_infected), by = 'date_formatted')
+  
+  simulated_subtype_seasons <- rbind(simulated_subtype_seasons,
+                                     subtype_seasons_i)
   
 }
 
@@ -306,5 +333,55 @@ sd_plot %>%
   labs(y = 'Relative healthcare attendance rates', x='', col = 'IMD')
 ggsave(file.path('output/figures/dummy_infections/healthcare_ratios.png'), width = 16, height = 8)
 
-write_rds(surveillance_data, .args[4])
+#### SIMULATED TESTING DATA ###
+
+simulated_subtype_seasons_formatted <- data.table(simulated_subtype_seasons %>% 
+  mutate(proportion_infected = case_when(is.na(proportion_infected) ~ 0, T ~ proportion_infected),
+         new_tests = 0))
+
+for(date_index in unique(simulated_subtype_seasons_formatted$date_formatted)){
+  
+  data <- simulated_subtype_seasons_formatted[date_formatted == date_index][,
+    proportion_of_proportion_infected := proportion_infected/sum(proportion_infected)]
+  
+  if(sum(data$proportion_infected) > 0){
+    
+    new_tests_1 <- rbinom(
+      n = 1, 
+      size = unique(data$total_flu),
+      p = data$proportion_of_proportion_infected[1]
+    )
+    
+    if(nrow(data) == 1){
+      simulated_subtype_seasons_formatted[date_formatted == date_index, 
+                                          new_tests := new_tests_1]
+    }
+    if(nrow(data) == 2){
+      new_tests_2 <- unique(data$total_flu) - new_tests_1
+      
+      simulated_subtype_seasons_formatted[date_formatted == date_index, 
+                                          new_tests := c(new_tests_1, new_tests_2)]
+    }
+    
+  }
+  
+}
+
+simulated_subtype_seasons_formatted %>% 
+  ggplot() +
+  geom_line(aes(date_formatted, new_tests, col = subtype)) + 
+  geom_line(aes(date_formatted, value, col = subtype), lty = 2) + 
+  theme_bw()
+
+saving_simulated_subtype_data <- simulated_subtype_seasons_formatted %>% 
+  select(season, date_formatted, week, total_tests, total_flu, subtype, new_tests) %>% 
+  rename(value = new_tests) %>% 
+  mutate(proportion = value/total_flu)
+  
+## save data 
+
+surveillance_data <- list(surveillance_data,
+                          saving_simulated_subtype_data)
+
+write_rds(surveillance_data, .args[5])
 

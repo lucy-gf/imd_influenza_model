@@ -190,7 +190,8 @@ for(i in 1:nrow(subtype_seasons)){
     trans = pars$transmissibility,
     susc = susceptibility_vec,
     lat_per = known_pars$epid_periods[1],
-    inf_per = known_pars$epid_periods[2]
+    inf_per = known_pars$epid_periods[2],
+    t_end = 365
   )
   
   # check not rising at end of time

@@ -12,7 +12,6 @@ options(dplyr.summarise.inform = FALSE)
 
 .args <- c(file.path("data", "inputs", "imd_age_pop.rds"),
            file.path("data", "inputs", "contact_matrix.rds"),
-           file.path("data", "inputs", "subtype_years.rds"),
            file.path("data", "dummy_data", "dummy_surveillance.rds"),
            file.path("data", "dummy_data", "known_parameters.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
@@ -92,14 +91,12 @@ ndim <- nrow(pc_cm)
 if(!all.equal(2*ng, ndim)){warning('dimensions not adding up')}
 if(!all.equal(2*nimd*nage, ndim)){warning('dimensions not adding up')}
 
-## SUBTYPE-SEASONS
-subtype_seasons <- readRDS(.args[3])
-
 ## SURVEILLANCE DATA
-surveillance_data <- readRDS(.args[4])
+surveillance_data <- readRDS(.args[3])[[1]]
+subtype_seasons <- readRDS(.args[3])[[2]]
 
 ## KNOWN PARAMETERS
-known_pars <- readRDS(.args[5])
+known_pars <- readRDS(.args[4])
 
 years <- known_pars$years
 
@@ -153,8 +150,8 @@ subtype_init_pars <- c(0.2, rep(0.5, 3), 2.5,
 
 ## MCMC pars
 burn_in <- 0
-thinning_value <- 100
-n_samples <- 3000
+thinning_value <- 1
+n_samples <- 200
 
 number_string <- paste0(burn_in,'_',thinning_value,'_',n_samples)
 
@@ -181,11 +178,11 @@ initial_parameters_in <- if(i == 3){
   matrix(c(subtype_init_pars,subtype_init_pars,rep(0, 4)), nrow=1)
 }
 
-PREVIOUS_PARS <- T
+PREVIOUS_PARS <- F
 
 if(PREVIOUS_PARS){
   # load in previous parameters 
-  previous_run <- readRDS(.args[6])
+  previous_run <- readRDS(.args[5])
   previous_par_files <- list.files(paste0("output/data/",previous_run$x))
   previous_par_files_filt <- previous_par_files[grepl(paste0('INDEX',i,'_CHAIN',chain,'_'),previous_par_files)]
   previous_pars <- readRDS(file.path('output','data',previous_run$x,previous_par_files_filt))
@@ -221,7 +218,7 @@ mcmc_results <- run_mcmc_inference(
   thinning = thinning_value,
   n_chains = 1,
   txt_output = paste0(i, '_', chain),
-  manual_print_mod = 1000
+  manual_print_mod = 10
 )
 
 # code to compare calculated log-likelihood to attached log-likelihood
@@ -241,11 +238,11 @@ write_rds(data.table(x=number_string,
                      previous_pars = if(PREVIOUS_PARS){previous_run$x}else{NULL},
                      previous_pars_date = if(PREVIOUS_PARS){previous_run$date}else{NULL},
                      previous_pars_save_all = if(PREVIOUS_PARS){previous_run$save_all}else{NULL}
-                     ), .args[6])
+                     ), .args[5])
 
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',
                                            thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
-                             gsub('data/',paste0('data/',number_string,'/'),.args[6])))
+                             gsub('data/',paste0('data/',number_string,'/'),.args[5])))
 
 

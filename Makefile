@@ -65,7 +65,7 @@ all_pars: ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 ${DUMMYDAT}/dummy_infections.rds: ${DUMMYDIR}/dummy_infections.R ${INPUTDIR}/imd_age_pop.rds ${INPUTDIR}/contact_matrix.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
 	$(call R)
 
-${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds
+${DUMMYDAT}/dummy_surveillance.rds: ${DUMMYDIR}/dummy_surveillance.R ${DUMMYDAT}/dummy_infections.rds ${DUMMYDAT}/known_parameters.rds ${DUMMYDAT}/unknown_parameters.rds ${INPUTDIR}/subtype_years.rds
 	$(call R)
 
 dummy_inf: ${DUMMYDAT}/dummy_infections.rds
