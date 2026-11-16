@@ -944,7 +944,7 @@ plot_trace <- function(var, filtered = F){
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
-        filter(iteration > max(iteration)/2) %>% 
+        filter(iteration > 0.3*max(iteration)) %>% 
         ggplot() +
         geom_hline(yintercept = 0, lty=2) +
         facet_grid(.~season, scales = 'free') +

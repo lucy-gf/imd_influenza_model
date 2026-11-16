@@ -211,8 +211,12 @@ par_name_df <- epid_pars %>%
 #### LOAD IN MCMC POSTERIOR DATA ####
 
 mcmc_samples_filtered_burned <- data.table(readRDS(.args[8]))
-n_samples <- nrow(mcmc_samples_filtered_burned)/nrow(mcmc_samples_filtered_burned %>% select(chain,epidemic) %>% unique())
-mcmc_samples_filtered_burned[, iteration := 1:n_samples, .(chain, epidemic)] # reset iterations
+
+## manual burn in 
+mcmc_samples_filtered_burned <- mcmc_samples_filtered_burned[iteration >= 0.8*max(iteration)]
+
+# n_samples <- nrow(mcmc_samples_filtered_burned)/nrow(mcmc_samples_filtered_burned %>% select(chain,epidemic) %>% unique())
+mcmc_samples_filtered_burned[, iteration := 1:nrow(.SD), .(chain, epidemic)] # reset iterations
 
 admin_cols <- c('likelihood','gp_likelihood','hospital_likelihood','subtype_likelihood',
                 'chain','iteration','epidemic')
@@ -456,6 +460,65 @@ ggsave(gsub('data/posterior_epidemics.rds',figure_filename('healthcare_attendanc
 fitted_epidemics[, start_of_epidemic := as.Date(paste0('01-09-', year), format = '%d-%m-%Y')]
 fitted_epidemics[, date := start_of_epidemic + t] ## add date
 fitted_epidemics[, c('t','start_of_epidemic') := NULL]
+
+## OPTIONAL:
+## attack rate by risk group for each bootstrap 
+if(F){
+  ar_vars <- c('age_grp','imd_quintile','risk_level')
+  
+  fitted_epidemics %>% 
+    group_by(chain_it_id, date, !!!syms(ar_vars)) %>% 
+    summarise(infections = sum(infections)) %>% 
+    left_join(vaccinated_data %>% select(!!!syms(ar_vars), pop) %>% unique() %>% 
+                mutate(imd_quintile = factor(imd_quintile)),
+              by = ar_vars) %>% 
+    group_by(chain_it_id, date, risk_level, age_grp, imd_quintile) %>% summarise(infections = sum(infections),
+                                                                                 pop = sum(pop)) %>% 
+    mutate(attack_rate = 100000*infections/pop) %>% select(!c(infections,pop)) %>% 
+    pivot_wider(names_from = risk_level, values_from = attack_rate) %>% 
+    mutate(imd_quintile = paste0('IMD ', imd_quintile)) %>% 
+    ggplot() + 
+    geom_line(aes(date, high/low, group = chain_it_id), alpha = 0.1) + 
+    geom_hline(yintercept = 1, lty = 2, col = 2) + 
+    facet_grid(age_grp ~ imd_quintile, scales = 'free') + 
+    ylim(c(0.99, 1.01)) + ylab('Attack rate (high risk / low risk)') + 
+    theme_bw() 
+  
+  fitted_epidemics %>% 
+    group_by(chain_it_id, date, !!!syms(ar_vars)) %>% 
+    summarise(infections = sum(infections)) %>% 
+    left_join(vaccinated_data %>% select(!!!syms(ar_vars), pop) %>% unique() %>% 
+                mutate(imd_quintile = factor(imd_quintile)),
+              by = ar_vars) %>% 
+    group_by(chain_it_id, date, risk_level, age_grp) %>% summarise(infections = sum(infections),
+                                                                   pop = sum(pop)) %>% 
+    mutate(attack_rate = 100000*infections/pop) %>% select(!c(infections,pop)) %>% 
+    pivot_wider(names_from = risk_level, values_from = attack_rate) %>% 
+    ggplot() + 
+    geom_point(aes(date, high/low, group = chain_it_id), alpha = 0.1) + 
+    geom_hline(yintercept = 1, lty = 2, col = 2) + 
+    facet_wrap(age_grp ~ ., scales = 'fixed') + ylab('Attack rate (high risk / low risk)') + 
+    theme_bw() 
+  
+  fitted_epidemics %>% 
+    group_by(chain_it_id, date, !!!syms(ar_vars)) %>% 
+    summarise(infections = sum(infections)) %>% 
+    left_join(vaccinated_data %>% select(!!!syms(ar_vars), pop) %>% unique() %>% 
+                mutate(imd_quintile = factor(imd_quintile)),
+              by = ar_vars) %>% 
+    left_join(data.frame(age_grp = unique(fitted_epidemics$age_grp), 
+                         broad_age = fcn_assign_ages('children','adult','older_adults',
+                                                     unique(fitted_epidemics$age_grp))), by = 'age_grp') %>% 
+    group_by(chain_it_id, date, risk_level, broad_age) %>% summarise(infections = sum(infections),
+                                                                     pop = sum(pop)) %>% 
+    mutate(attack_rate = 100000*infections/pop) %>% select(!c(infections,pop)) %>% 
+    pivot_wider(names_from = risk_level, values_from = attack_rate) %>% 
+    ggplot() + 
+    geom_point(aes(date, high/low, group = chain_it_id), alpha = 0.1) + 
+    geom_hline(yintercept = 1, lty = 2, col = 2) + 
+    facet_grid(broad_age ~ .) + ylab('Attack rate (high risk / low risk)') + 
+    theme_bw() 
+}
 
 # aggregate week
 fitted_epidemics[, date := last_monday(date)]

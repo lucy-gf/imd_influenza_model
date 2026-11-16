@@ -191,7 +191,9 @@ get_samples <- function(i){
   data.table(do.call(rbind, chain_list))[, epidemic := i]
 }
 
-read_and_get_samples <- function(i){
+read_and_get_samples <- function(i,
+                                 run_date_in = run_date,
+                                 number_str_in = number_str){
   
   get_samples_parallel <- function(k){
     samp <- data.table(dat$chain[[k]])
@@ -223,17 +225,17 @@ read_and_get_samples <- function(i){
   }
   
   # Code could have finished running in the days before
-  dates <- as.character(run_date - 0:6)
+  dates <- as.character(run_date_in - 0:6)
   
   # files in directory
-  all_files <- list.files(path = gsub('mcmc_samples.rds',number_str,.args[8]))
+  all_files <- list.files(path = gsub('mcmc_samples.rds',number_str_in,.args[8]))
   
   # files finishing on relevant dates
   date_files <- c()
   for(date in dates){date_files <- c(date_files, all_files[grepl(date, all_files)])}
   
   # files with correct burn-in, thinning etc.
-  date_files <- date_files[grepl(number_str, date_files)]
+  date_files <- date_files[grepl(number_str_in, date_files)]
   
   # files with correct index
   date_files <- date_files[grepl(paste0('INDEX',i), date_files)]
@@ -252,12 +254,12 @@ read_and_get_samples <- function(i){
     date_file <- date_files[grepl(paste0("CHAIN", chain_job, "_"), date_files)]
     if(length(date_file) != 1){stop(paste0('Too many eligible data files (', chain_job, ': ', date_file[1], ')'))}
     
-    dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str,'/',date_file),.args[8]))),
+    dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[8]))),
                     error = NA)
     
     if(length(dat) == 1){
       if(is.na(dat)){
-        dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str,'/',date_file),.args[8]))))
+        dat <- tryCatch(expr = suppressWarnings(readRDS(gsub('mcmc_samples.rds',paste0(number_str_in,'/',date_file),.args[8]))))
       }
     }
     
@@ -284,10 +286,15 @@ output_details_file <- readRDS(.args[8])
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 save_all_flag <- output_details_file$save_all
+merge_flag <- output_details_file$using_previous_pars
+if(merge_flag){
+  merging_run <- output_details_file$previous_pars
+}
+
 message('\n------------\nDate run: ',as.character(run_date),'\n------------',sep='')
 message('\n------------\nSettings: ',number_str,'\n------------\n',sep='')
 message('\n------------\nSaved: ',ifelse(save_all_flag,'all','minimal'),'\n------------\n',sep='')
-number_date_str <- paste0(number_str, '_', run_date)
+if(merge_flag){message('\n------------\nMerge with previous run (', merging_run,')\n------------\n',sep='')}
 
 # was it run on the HPC? The files saved differently
 WAS_HPC <- output_details_file$HPC
@@ -297,6 +304,24 @@ if(WAS_HPC){
   m1 <- read_and_get_samples(1)
   m2 <- read_and_get_samples(2)
   m3 <- read_and_get_samples(3)
+  
+  if(merge_flag){ # merge with previous iterations, bump up iteration count
+    
+    m1_prev <- read_and_get_samples(1,
+                                    output_details_file$previous_pars_date,
+                                    merging_run)
+    m2_prev <- read_and_get_samples(2,
+                                    output_details_file$previous_pars_date,
+                                    merging_run)
+    m3_prev <- read_and_get_samples(3,
+                                    output_details_file$previous_pars_date,
+                                    merging_run)
+    
+    m1 <- rbind(m1_prev, m1[, iteration := iteration + max(m1_prev$iteration)])
+    m2 <- rbind(m2_prev, m2[, iteration := iteration + max(m2_prev$iteration)])
+    m3 <- rbind(m3_prev, m3[, iteration := iteration + max(m3_prev$iteration)])
+    
+  }
   
   # bind any non-empty data
   mcmc_samples <- data.table()
@@ -310,6 +335,8 @@ if(WAS_HPC){
   mcmc_samples[, c('LP','LPr') := NULL]
   
 }else{
+  
+  number_date_str <- paste0(number_str, '_', run_date)
   
   mcmc_samples_list <- readRDS(gsub('.rds',paste0('_', number_date_str,'.rds'),.args[8]))
   mcmc_samples <- rbindlist(lapply(1:3, get_samples))
@@ -441,18 +468,19 @@ mcmc_samples_filtered_burned <- if(save_all_flag){
   ## filter past burn-in
   mcmc_samples_filtered[iteration > burn_in,]#[, iteration := 1:n_samples, .(chain, epidemic)]
 }else{
-  # copy(mcmc_samples_filtered)
-  # manually add 100,000 burn in
-  mcmc_samples_filtered[iteration > 1e5,]
+  copy(mcmc_samples_filtered)
+  # mcmc_samples_filtered[iteration > 3e5,] # manually add 100,000 burn in
 }
 
 #### PLOT TRACE #### 
 
-plot_trace(var="transmissibility")
-ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('example_trace'),.args[length(.args)]), width = 14, height = 7)
-
 message('Plotting filtered traces')
 traces_filtered <- map(.x = plotting_cols, .f = ~{plot_trace(var=.x, filtered=T)})
+map(.x = 1:length(traces_filtered), .f = ~{
+  ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename(plotting_cols[.x]),.args[length(.args)]), 
+         plot = traces_filtered[.x],
+         width = 14, height = 7)
+})
 tf <- patchwork::wrap_plots(traces_filtered, nrow = 6) 
 ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), 
        plot = tf,
@@ -462,6 +490,39 @@ message('Plotting log-likelihood')
 log_likelihood_plot <- plot_trace('likelihood'); suppressWarnings(log_likelihood_plot)
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), 
        width = 12, height = 16)
+
+risk_ratios <- mcmc_samples_filtered_burned %>% 
+  select(job, chain, iteration, epidemic, contains('care_rate')) %>% 
+  pivot_longer(!c(job, chain, iteration, epidemic)) %>% 
+  mutate(setting = case_when(grepl('primary', name) ~ 'primary', grepl('secondary', name) ~ 'secondary'),
+         subtype = case_when(grepl('epid_1', name) ~ '1', grepl('epid_2', name) ~ '2'),
+         broad_age = case_when(grepl('children', name) ~ 'children', grepl('older_adults', name) ~ 'older_adults', T ~ 'adults'),
+         risk = case_when(grepl('high', name) ~ 'high', T ~ 'low')) %>% select(!name) %>% 
+  pivot_wider(names_from = risk, values_from = value) %>% 
+  mutate(high_over_low = high/low) %>% mutate(subtype_season = paste0(years[epidemic], ' (subtype ', subtype, ')'))
+
+true_ratios <- epid_pars %>% filter(grepl('care_rate', joining_name)) %>%  
+  mutate(setting = case_when(grepl('primary', joining_name) ~ 'primary', grepl('secondary', joining_name) ~ 'secondary'),
+         subtype = case_when(grepl('epid_1', joining_name) ~ '1', grepl('epid_2', joining_name) ~ '2'),
+         broad_age = case_when(grepl('children', joining_name) ~ 'children', grepl('older_adults', joining_name) ~ 'older_adults', T ~ 'adults'),
+         risk = case_when(grepl('high', joining_name) ~ 'high', T ~ 'low'), 
+         subtype_season = paste0(year, ' (subtype ', subtype, ')')) %>% 
+  select(subtype_season, setting, subtype, broad_age, risk, value) %>% 
+  pivot_wider(names_from = risk, values_from = value) %>% 
+  mutate(true_high_over_low = high/low)
+
+risk_ratios <- risk_ratios %>% 
+  left_join(true_ratios %>% select(!c(low,high)), by = c('subtype_season','setting','subtype','broad_age')) %>% 
+  filter(!subtype_season == '2025 (subtype 2)')
+
+risk_ratios$broad_age <- factor(risk_ratios$broad_age, levels = c('children','adults','older_adults')) 
+
+risk_ratios %>% 
+  ggplot() + 
+  geom_line(aes(iteration, high_over_low, color = as.factor(job), group = interaction(job, chain))) + 
+  geom_hline(aes(yintercept = true_high_over_low), lty = 2) +
+  facet_grid(interaction(broad_age,setting) ~ subtype_season, scales = 'free') + theme_bw() +
+  labs(y = 'IGPR or IHR (high risk / low risk)', col = 'job')
 
 #### PLOT DENSITY #### 
 # message('Plotting densities')
