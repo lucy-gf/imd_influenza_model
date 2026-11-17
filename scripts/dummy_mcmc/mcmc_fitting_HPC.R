@@ -345,9 +345,22 @@ write_rds(list(x=number_string,
                previous_pars_save_all = if(PREVIOUS_PARS){previous_run$save_all}else{NULL}), 
           .args[6])
 
+# ALSO save as a differently named file in case multiple runs happening
+write_rds(list(x=number_string,
+               HPC = T,
+               save_all = save_all_flag,
+               date = Sys.Date(),
+               pars_to_fit = pars_to_fit,
+               using_previous_pars = PREVIOUS_PARS,
+               previous_pars = if(PREVIOUS_PARS){previous_run$x}else{NULL},
+               previous_pars_date = if(PREVIOUS_PARS){previous_run$date}else{NULL},
+               previous_pars_save_all = if(PREVIOUS_PARS){previous_run$save_all}else{NULL}), 
+          gsub('.rds',paste0('_', number_string,'_',paste(pars_to_fit, collapse = '_'),'.rds'),
+               .args[6]))
+
 # save actual data
-write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', burn_in,'_',
-                                           thinning_value,'_',n_samples,'_',Sys.Date(),'.rds'),
+write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', 
+                                           number_string,'_',Sys.Date(),'.rds'),
                              gsub('data/',paste0('data/',number_string,'/'),.args[6])))
 
 
