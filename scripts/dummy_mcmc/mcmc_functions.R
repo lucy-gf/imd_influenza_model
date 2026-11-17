@@ -165,16 +165,16 @@ run_mcmc_inference <- function(
       #### PARAMETERS: EPIDEMIC 2 ####
       ##----------------------------##
       
-      transmissibility_2 <- pars_merged[1 + n_pars_per_subtype]
+      transmissibility_2 <- pars_merged[1 + n_pars_merged_per_subtype]
       
       susceptibility_vec_2 <- fcn_assign_ages(
-        pars_merged[2 + n_pars_per_subtype],
-        pars_merged[3 + n_pars_per_subtype],
-        pars_merged[4 + n_pars_per_subtype],
+        pars_merged[2 + n_pars_merged_per_subtype],
+        pars_merged[3 + n_pars_merged_per_subtype],
+        pars_merged[4 + n_pars_merged_per_subtype],
         age_labels
       )
       
-      init_infected_2 <- 10^(pars_merged[5 + n_pars_per_subtype])
+      init_infected_2 <- 10^(pars_merged[5 + n_pars_merged_per_subtype])
       
       # select IGPR and IHR vars 
       care_pars_start <- 6 + n_pars_merged_per_subtype
@@ -320,6 +320,10 @@ run_mcmc_inference <- function(
         reporting_data_high <- copy(reporting_data)[broad_ages, on = 'age_grp']
         reporting_data_high <- reporting_data_high[, risk_level := 'high'][GPH_rates_w[, c('broad_age','setting','multiplier')], on = c('broad_age','setting')]
         reporting_data_high <- reporting_data_high[, rate := rate*multiplier][, c('broad_age','multiplier') := NULL]
+        
+        ## FOR NOW, IF RATE > 1 FIX RATE = 1
+        reporting_data_high[rate > 1, rate := 1]
+        
         reporting_data <- rbind(reporting_data, reporting_data_high)
       }
       
@@ -345,7 +349,7 @@ run_mcmc_inference <- function(
       
       # Validate reporting rates
       if(any(is.na(time_series_long$rate))) return(-Inf)
-      if(any(time_series_long$rate <= 0 | time_series_long$rate >= 1)) return(-Inf)
+      if(any(time_series_long$rate < 0 | time_series_long$rate > 1)) return(-Inf)
       
       # Aggregate over vaccination status into a mean number of cases per {group x setting}
       # (as the rate varies between vaccinated/unvaccinated, but observations are not vaccination-specific)
@@ -366,6 +370,9 @@ run_mcmc_inference <- function(
       
       epi_data_1 <- produce_epi_data(1)
       epi_data_2 <- produce_epi_data(2)
+      
+      # return -Inf if fails
+      if(!is.list(epi_data_1) | !is.list(epi_data_2)) return(-Inf)
       
       weekly_proportions <- data.table(
         date_formatted = as.Date(paste0('01-09-',year(epidemic_to_fit$week_start[1])), format = '%d-%m-%Y') +
@@ -402,6 +409,9 @@ run_mcmc_inference <- function(
       ##-----------------------------##
       
       epi_data_1 <- produce_epi_data(1)
+    
+      # return -Inf if fails
+      if(!is.list(epi_data_1)) return(-Inf)
       
       MODELLED_EPI <- epi_data_1[[2]]
       
@@ -480,6 +490,19 @@ run_mcmc_inference <- function(
   
   llikelihood <- function(pars) {
     
+    if (is.matrix(pars)) {
+      
+      res <- parallel::mclapply(
+        seq_len(nrow(pars)),
+        function(j) single_ll(pars[j, ]),
+        mc.cores = n_cores
+      )
+      llikelihood_pars <- unlist(res)
+      
+    } else {
+      llikelihood_pars <- single_ll(pars)
+    }
+    
     if (ll_call_count == 0) { ll_start_time <<- Sys.time() }
     ll_call_count <<- ll_call_count + 1
     if (ll_call_count %% mod_val == 0) {
@@ -493,23 +516,12 @@ run_mcmc_inference <- function(
         Last updated: %s | Log-likelihood: %f",
         txt_output, ll_call_count, ll_total_calls,
         100 * ll_call_count / ll_total_calls, elapsed, remaining, 1000 / rate, 
-        as.character(now_time), llikelihood(pars)
+        as.character(now_time), llikelihood_pars
       ), txt_out)
       write_rds(pars, pars_out)
     }
     
-    if (is.matrix(pars)) {
-      
-      res <- parallel::mclapply(
-        seq_len(nrow(pars)),
-        function(j) single_ll(pars[j, ]),
-        mc.cores = n_cores
-      )
-      return(unlist(res))
-      
-    } else {
-      return(single_ll(pars))
-    }
+    return(llikelihood_pars)
     
   }
   
@@ -724,15 +736,16 @@ run_mcmc_inference <- function(
   # set up priors and lower/upper bounds
   {
   # IGPR and IHR centred roughly around the crude estimates (based on attack rate etc.)
+    beta_constrainer <- 500 #200
   prim_beta  <- if(primary_fitted){
-    beta_pars(initial_parameters[which(grepl('primary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], 200)
+    beta_pars(initial_parameters[which(grepl('primary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], beta_constrainer)
     }else{
-      beta_pars(true_values[which(grepl('primary_care',names(true_values)))[1]], 200)
+      beta_pars(true_values[which(grepl('primary_care',names(true_values)))[1]], beta_constrainer)
   }
   sec_beta   <- if(secondary_fitted){
-    beta_pars(initial_parameters[which(grepl('secondary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], 200)
+    beta_pars(initial_parameters[which(grepl('secondary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], beta_constrainer)
   }else{
-    beta_pars(true_values[which(grepl('secondary_care',names(true_values)))[1]], 200)
+    beta_pars(true_values[which(grepl('secondary_care',names(true_values)))[1]], beta_constrainer)
   }
   
   # Susceptibility beta distributed, mean at 0.5
@@ -839,15 +852,18 @@ run_mcmc_inference <- function(
           }else{trans_2 <- true_values['transmissibility_epid_2']}
         }
         
+        R0_chk_1 <- R0_func(susceptibility = fcn_assign_ages(susc_1[1], susc_1[2], susc_1[3], age_labels),
+                            inf_period = epid_periods[2], beta_in = trans_1, cm_in = cm_input,
+                            per_capita = TRUE, population_vector = demography_input$population)
+        valid <- trans_1 >= min_trans && trans_1 <= max_trans &&
+          R0_chk_1 >= min_r0 && R0_chk_1 <= max_r0
+        
         if(n_subtypes == 2){
-         
-          if(trans_1 >= min_trans & trans_1 <= max_trans & 
-             trans_2 >= min_trans & trans_2 <= max_trans) valid <- TRUE
-          
-        }else{
-          
-          if(trans_1 >= min_trans & trans_1 <= max_trans) valid <- TRUE
-          
+          R0_chk_2 <- R0_func(susceptibility = fcn_assign_ages(susc_2[1], susc_2[2], susc_2[3], age_labels),
+                              inf_period = epid_periods[2], beta_in = trans_2, cm_in = cm_input,
+                              per_capita = TRUE, population_vector = demography_input$population)
+          valid <- valid && trans_2 >= min_trans && trans_2 <= max_trans &&
+            R0_chk_2 >= min_r0 && R0_chk_2 <= max_r0
         }
         
       }

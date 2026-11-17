@@ -230,7 +230,6 @@ names_pars_to_fit <- c(names_pars_to_fit, imd_spline_names)
 names(pars_to_fit) <- names_pars_to_fit
 
 ## set true value vector
-
 true_values_in <- mcmc_true_values$value 
 if(length(pars_to_fit) != length(true_values_in)){stop('True value vector wrong length!')}
 true_values_in[pars_to_fit] <- NA
@@ -294,7 +293,7 @@ if(PREVIOUS_PARS){
   previous_par_files_filt <- previous_par_files[grepl(paste0('INDEX',i,'_CHAIN',chain,'_'),previous_par_files)]
   previous_pars <- readRDS(file.path('output','data',previous_run$x,previous_par_files_filt))
   
-  parameters_vec <- if(TWO_SUBTYPES){38}else{21} # TODO Fix when merging with not all parameters being fitted
+  parameters_vec <- sum(pars_to_fit) # TODO Fix when merging with not all parameters being fitted
   
   # make the end of the last run into the initial inputs for this run
   initial_parameters_in <- matrix(
