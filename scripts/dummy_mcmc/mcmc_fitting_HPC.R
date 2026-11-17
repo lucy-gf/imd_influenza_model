@@ -17,7 +17,7 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "dummy_data", "mcmc_true_values.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
 
-bash_args <- if (interactive()) c(3, 1) else as.numeric(commandArgs(trailingOnly = TRUE))
+bash_args <- if (interactive()) c(3, 1, 1, 1, 1, 1, 1, 1) else as.numeric(commandArgs(trailingOnly = TRUE))
 
 #### RUN OPTIONS ####
 
@@ -31,6 +31,32 @@ RISK_RATIOS_FIXED <- T
 
 ## Will this run be merging with a previous run?
 PREVIOUS_PARS <- F
+
+# Which parameters will be fitted?
+# (will be fixed at true values if not being fitted)
+
+trans_fit <- as.logical(bash_args[3]) # transmissibility
+susc_fit <- as.logical(bash_args[4]) # susceptibility (x3)
+init_fit <- as.logical(bash_args[5]) # initial infected
+primary_fit <- as.logical(bash_args[6]) # IGPRs (x3)
+secondary_fit <- as.logical(bash_args[7]) # IHRs (x3)
+imd_spline_fit <- as.logical(bash_args[8]) # IMD splines (x4)
+
+message(paste0('Parameters fitted: ',
+               ifelse(trans_fit,'transmissibility, ', ''),
+               ifelse(susc_fit,'susceptibility, ', ''),
+               ifelse(init_fit,'initial infected, ', ''),
+               ifelse(primary_fit,'primary care rates, ', ''),
+               ifelse(secondary_fit,'secondary care rates, ', ''),
+               ifelse(imd_spline_fit,'IMD splines', ''),
+               '\nParameters fixed:',
+               ifelse(!trans_fit,', transmissibility', ''),
+               ifelse(!susc_fit,', susceptibility', ''),
+               ifelse(!init_fit,', initial infected', ''),
+               ifelse(!primary_fit,', primary care rates', ''),
+               ifelse(!secondary_fit,', secondary care rates', ''),
+               ifelse(!imd_spline_fit,', IMD splines', ''),
+               '\nRisk ratios: ', ifelse(RISK_RATIOS_FIXED,'fixed','unfixed')))
 
 ###########################################################################################
 
@@ -185,31 +211,7 @@ if(RISK_RATIOS_FIXED){
   subtype_parameter_names <- subtype_parameter_names[!grepl('_high', subtype_parameter_names)]
 }
 
-# not necessarily all parameters have to be fitted in the MCMC
-# (will be fixed at true values if not being fitted)
-
-trans_fit <- F # transmissibility
-susc_fit <- T # susceptibility (x3)
-init_fit <- F # initial infected
-primary_fit <- T # IGPRs (x3)
-secondary_fit <- T # IHRs (x3)
-imd_spline_fit <- T # IMD splines (x4)
-
-message(paste0('Parameters fitted: ',
-               ifelse(trans_fit,'transmissibility, ', ''),
-               ifelse(susc_fit,'susceptibility, ', ''),
-               ifelse(init_fit,'initial infected, ', ''),
-               ifelse(primary_fit,'primary care rates, ', ''),
-               ifelse(secondary_fit,'secondary care rates, ', ''),
-               ifelse(imd_spline_fit,'IMD splines, ', ''),
-               '\nParameters fixed:',
-               ifelse(!trans_fit,', transmissibility', ''),
-               ifelse(!susc_fit,', susceptibility', ''),
-               ifelse(!init_fit,', initial infected', ''),
-               ifelse(!primary_fit,', primary care rates', ''),
-               ifelse(!secondary_fit,', secondary care rates', ''),
-               ifelse(!imd_spline_fit,', IMD splines', '')))
-
+# make pars_to_fit input
 subtype_pars_to_fit <- c(trans_fit,
                          rep(susc_fit, 3),
                          init_fit,
@@ -265,8 +267,8 @@ if(ncol(initial_parameters_in) != sum(pars_to_fit)){stop('initial_parameters_in 
 
 ## MCMC pars
 burn_in <- 0
-thinning_value <- 1
-n_samples <- 200
+thinning_value <- 100
+n_samples <- 1500
 
 number_string <- paste0(burn_in,'_',thinning_value,'_',n_samples)
 
@@ -328,7 +330,7 @@ mcmc_results <- run_mcmc_inference(
   thinning = thinning_value,
   n_chains = 1,
   txt_output = paste0(i, '_', chain),
-  manual_print_mod = 10
+  manual_print_mod = 1000
 )
 
 #### SAVE ####
