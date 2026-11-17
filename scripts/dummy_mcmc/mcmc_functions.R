@@ -16,6 +16,8 @@ run_mcmc_inference <- function(
     care_delays,
     initial_parameters,
     save_all = F,
+    parameters_to_fit,
+    true_values,
     n_samples, 
     nburn, 
     thinning,
@@ -36,7 +38,19 @@ run_mcmc_inference <- function(
   length_n_pars <- if(!is.null(nrow(initial_parameters))){ncol(initial_parameters)}else{
     length(initial_parameters)
   }
-  n_pars_per_subtype <- (length_n_pars - 4)/n_subtypes
+
+  n_pars_per_subtype <- sum(parameters_to_fit[!grepl('imd_spline',names(parameters_to_fit))])/n_subtypes
+  
+  # which parameters are being fitted? 
+  trans_fitted <- parameters_to_fit['transmissibility_epid_1']
+  susc_fitted <- parameters_to_fit['children_susceptibility_epid_1']
+  init_fitted <- parameters_to_fit['init_infected_epid_1']
+  primary_fitted <- parameters_to_fit['primary_care_rate_children_low_epid_1']
+  secondary_fitted <- parameters_to_fit['secondary_care_rate_children_low_epid_1']
+  imd_splines_fitted <- parameters_to_fit['imd_spline_primary_1']
+  
+  RISK_RATIOS_FIXED <- !any(grepl('_high', names(parameters_to_fit)))
+  N_IGPR_VARS <- N_IHR_VARS <- ifelse(RISK_RATIOS_FIXED, 3, 6)
   
   # DEzs sampler will require 3 chains
   n_pop_internal <- 3
@@ -57,37 +71,67 @@ run_mcmc_inference <- function(
   # Define the log likelihood function
   single_ll <- function(pars) {
     
+    # merge the proposed parameters (pars) with the true values for parameters
+    # not being fitted (true_values) to make one vector of fixed length 
+    # (length only depends on n_subtypes and RISK_RATIOS_FIXED)
+    pars_merged <- rep(NA, length(parameters_to_fit))
+    par_k <- 1 # tracker of where in parameter vector to take from
+    for(k in 1:length(pars_merged)){
+      if(parameters_to_fit[k]){
+        pars_merged[k] <- pars[par_k]; par_k <- par_k + 1
+      }else{
+        pars_merged[k] <- true_values[k]
+      }
+    }
+    
+    # how many parameters TOTAL
+    n_pars_merged_per_subtype <- length(parameters_to_fit[!grepl('imd_spline',names(parameters_to_fit))])/n_subtypes
+    
+    # what subtypes to fit?
     epidemic_1 <- unique(subtype_season$subtype)[1]
-    epidemic_2 <- ifelse(n_subtypes == 0, NA, unique(subtype_season$subtype)[2])
+    epidemic_2 <- ifelse(n_subtypes < 2, NA, unique(subtype_season$subtype)[2])
     
     ##----------------------------##
     #### PARAMETERS: EPIDEMIC 1 ####
     ##----------------------------##
     
-    transmissibility_1 <- pars[1]
+    transmissibility_1 <- pars_merged[1]
      
     susceptibility_vec_1 <- fcn_assign_ages(
-      pars[2],
-      pars[3],
-      pars[4],
+      pars_merged[2],
+      pars_merged[3],
+      pars_merged[4],
       age_labels
     )
     
-    init_infected_1 <- 10^(pars[5])
-    care_rate_df_1 <- data.frame(
-      broad_age = rep(unique(broad_ages$broad_age), 2),
-      risk_level = rep(c('low','high'), each = 3),
-      primary_care = pars[6:11],
-      secondary_care = pars[12:17]
-    )
+    init_infected_1 <- 10^(pars_merged[5])
+    
+    # select IGPR and IHR vars 
+    care_pars_start <- 6
+    care_rate_df_1 <- if(RISK_RATIOS_FIXED){
+      # only low risk
+      data.frame(
+        broad_age = rep(unique(broad_ages$broad_age), 1),
+        risk_level = 'low',
+        primary_care = pars_merged[care_pars_start:(care_pars_start + N_IGPR_VARS - 1)],
+        secondary_care = pars_merged[(care_pars_start + N_IGPR_VARS):(care_pars_start + 2*N_IGPR_VARS - 1)])
+      }else{
+        # low and high risk
+        data.frame(
+          broad_age = rep(unique(broad_ages$broad_age), 2),
+          risk_level = rep(c('low','high'), each = n_distinct(broad_ages$broad_age)),
+          primary_care = pars_merged[care_pars_start:(care_pars_start + N_IGPR_VARS - 1)],
+          secondary_care = pars_merged[(care_pars_start + N_IGPR_VARS):(care_pars_start + 2*N_IGPR_VARS - 1)]
+        )
+    }
     care_rate_age_df_1 <- data.table(cross_join(
       care_rate_df_1,
       broad_ages))[broad_age.x == broad_age.y,]
     care_rate_age_df_1[, c('broad_age.x','broad_age.y') := NULL]
     
     imd_spline_pars <- data.table(
-      primary = pars[1:2 + n_subtypes*n_pars_per_subtype],
-      secondary = pars[3:4 + n_subtypes*n_pars_per_subtype]
+      primary = pars_merged[1:2 + n_subtypes*n_pars_merged_per_subtype],
+      secondary = pars_merged[3:4 + n_subtypes*n_pars_merged_per_subtype]
     )
     rel_imd_rep_rates <- data.frame(imd_quintile = 1:5,
                                     rel_primary_rates = imd_spline(imd_spline_pars$primary),
@@ -108,7 +152,7 @@ run_mcmc_inference <- function(
                              value.name = 'rate')
     
     # any out-of-bounds proposals slipping past the prior
-    if(any(is.na(pars)) || 
+    if(any(is.na(pars_merged)) || 
        transmissibility_1 < min_trans || 
        sum(susceptibility_vec_1 < min_susc) > 0  || sum(susceptibility_vec_1 > max_susc) > 0 ||
        init_infected_1 < 0 || init_infected_1 > min(demography_input$population) ) {
@@ -121,22 +165,35 @@ run_mcmc_inference <- function(
       #### PARAMETERS: EPIDEMIC 2 ####
       ##----------------------------##
       
-      transmissibility_2 <- pars[1 + n_pars_per_subtype]
+      transmissibility_2 <- pars_merged[1 + n_pars_per_subtype]
       
       susceptibility_vec_2 <- fcn_assign_ages(
-        pars[2 + n_pars_per_subtype],
-        pars[3 + n_pars_per_subtype],
-        pars[4 + n_pars_per_subtype],
+        pars_merged[2 + n_pars_per_subtype],
+        pars_merged[3 + n_pars_per_subtype],
+        pars_merged[4 + n_pars_per_subtype],
         age_labels
       )
       
-      init_infected_2 <- 10^(pars[5 + n_pars_per_subtype])
-      care_rate_df_2 <- data.frame(
-        broad_age = rep(unique(broad_ages$broad_age), 2),
-        risk_level = rep(c('low','high'), each = 3),
-        primary_care = pars[6:11 + n_pars_per_subtype],
-        secondary_care = pars[12:17 + n_pars_per_subtype]
-      )
+      init_infected_2 <- 10^(pars_merged[5 + n_pars_per_subtype])
+      
+      # select IGPR and IHR vars 
+      care_pars_start <- 6 + n_pars_merged_per_subtype
+      care_rate_df_2 <- if(RISK_RATIOS_FIXED){
+        # only low risk
+        data.frame(
+          broad_age = rep(unique(broad_ages$broad_age), 1),
+          risk_level = 'low',
+          primary_care = pars_merged[care_pars_start:(care_pars_start + N_IGPR_VARS - 1)],
+          secondary_care = pars_merged[(care_pars_start + N_IGPR_VARS):(care_pars_start + 2*N_IGPR_VARS - 1)])
+      }else{
+        # low and high risk
+        data.frame(
+          broad_age = rep(unique(broad_ages$broad_age), 2),
+          risk_level = rep(c('low','high'), each = n_distinct(broad_ages$broad_age)),
+          primary_care = pars_merged[care_pars_start:(care_pars_start + N_IGPR_VARS - 1)],
+          secondary_care = pars_merged[(care_pars_start + N_IGPR_VARS):(care_pars_start + 2*N_IGPR_VARS - 1)]
+        )
+      }
       care_rate_age_df_2 <- data.table(cross_join(
         care_rate_df_2,
         broad_ages))[broad_age.x == broad_age.y,]
@@ -157,7 +214,7 @@ run_mcmc_inference <- function(
                                value.name = 'rate')
       
       # any out-of-bounds proposals slipping past the prior
-      if(any(is.na(pars)) || 
+      if(any(is.na(pars_merged)) || 
          transmissibility_2 < min_trans || 
          sum(susceptibility_vec_2 < min_susc) > 0  || sum(susceptibility_vec_2 > max_susc) > 0 ||
          init_infected_2 < 0 || init_infected_2 > min(demography_input$population) ) {
@@ -232,8 +289,41 @@ run_mcmc_inference <- function(
       time_series_weekly <- time_series_fit[, .(infections = sum(infections)), 
                                             by = .(week_start, age_grp, imd_quintile, risk_level, vaccinated)]
       
-      # Join reporting rates (make primary and secondary care versions)
+      # select IGPR and IHR data
       reporting_data <- get(paste0('reporting_long_', k))
+      
+      # if in RISK_RATIOS_FIXED, need to manually produce reporting_data for high risk
+      if(RISK_RATIOS_FIXED){
+        attack_rates <- time_series_weekly[broad_ages, on = 'age_grp']
+        attack_rates <- attack_rates[, .(infections = sum(infections)), 
+                                     by = .(broad_age, risk_level)]
+        attack_rates <- attack_rates[demography_input[broad_ages, on = 'age_grp'][, .(population = sum(population)), 
+                                                                                  by = .(broad_age, risk_level)], on = c('broad_age','risk_level')]
+        attack_rates[, attack_rate := infections/population][, risk_level := paste0(risk_level, '_AR')]
+        attack_rates_w <- dcast(attack_rates, value.var = 'attack_rate',
+                                broad_age ~ risk_level)
+        GPH_rates <- melt(epidemic_dt, 
+                          measure.vars = c('primary_care', 'secondary_care'),
+                          variable.name = 'setting', 
+                          value.name = 'observations'
+        )[broad_ages, on = 'age_grp'][, .(observations = sum(observations)), 
+                                      by = c('broad_age','risk_level','setting')]
+        GPH_rates <- GPH_rates[demography_input[broad_ages, on = 'age_grp'][, .(population = sum(population)),
+                                                                            by = .(broad_age, risk_level)], on = c('broad_age','risk_level')]
+        GPH_rates[, GPH_rate := observations/population][, risk_level := paste0(risk_level, '_GPH')]
+        GPH_rates_w <- dcast(GPH_rates, value.var = 'GPH_rate',
+                             broad_age + setting ~ risk_level)
+        GPH_rates_w <- GPH_rates_w[attack_rates_w, on = 'broad_age'] 
+        GPH_rates_w[, multiplier := (low_AR*high_GPH)/(low_GPH*high_AR)]
+        
+        # merge 
+        reporting_data_high <- copy(reporting_data)[broad_ages, on = 'age_grp']
+        reporting_data_high <- reporting_data_high[, risk_level := 'high'][GPH_rates_w[, c('broad_age','setting','multiplier')], on = c('broad_age','setting')]
+        reporting_data_high <- reporting_data_high[, rate := rate*multiplier][, c('broad_age','multiplier') := NULL]
+        reporting_data <- rbind(reporting_data, reporting_data_high)
+      }
+      
+      # Join reporting rates (make primary and secondary care versions)
       time_series_long <- merge(rbind(cbind(time_series_weekly, setting = unique(reporting_data$setting)[1]),
                                       cbind(time_series_weekly, setting = unique(reporting_data$setting)[2])), 
                                 reporting_data,
@@ -342,6 +432,7 @@ run_mcmc_inference <- function(
     
     if(F){
       time_series_joint %>% ## plot {observations} against {infections x reporting rates}
+        mutate(imd_quintile = paste0('IMD ', imd_quintile)) %>% 
         ggplot() + theme_bw() +
         geom_line(aes(week_start,expected_cases, lty=risk_level, col=setting, group=interaction(setting, risk_level))) +
         geom_point(aes(week_start,observations, shape=risk_level, col=setting, group=interaction(setting, risk_level)), alpha = 0.4) +
@@ -424,45 +515,63 @@ run_mcmc_inference <- function(
   
   llprior <- function(pars) {
     
-    # pars[1] is transmissibility, pars[2:4] are susceptibility (children, adults, older adults), 
-    # pars[5] is log of initial infected on 1st september
+    names(pars) <- names(parameters_to_fit)[parameters_to_fit]
     
-    susceptibility_vec_1 <- fcn_assign_ages(
-      pars[2],
-      pars[3],
-      pars[4],
+    susceptibility_vec_1 <- unname(if(susc_fitted){fcn_assign_ages(
+      pars['children_susceptibility_epid_1'],
+      pars['adults_susceptibility_epid_1'],
+      pars['older_adults_susceptibility_epid_1'],
       age_labels
-    )
+    )}else{fcn_assign_ages(
+      true_values['children_susceptibility_epid_1'],
+      true_values['adults_susceptibility_epid_1'],
+      true_values['older_adults_susceptibility_epid_1'],
+      age_labels
+    )})
+    
+    trans_1 <- ifelse(trans_fitted, pars['transmissibility_epid_1'], true_values['transmissibility_epid_1'])
+    
+    init_1 <- ifelse(init_fitted, pars['init_infected_epid_1'], true_values['init_infected_epid_1'])
     
     R0_1 <- R0_func(susceptibility = susceptibility_vec_1,
                     inf_period = epid_periods[2],
-                    beta_in = pars[1],
+                    beta_in = trans_1,
                     cm_in = cm_input,
                     per_capita = T,
                     population_vector = demography_input$population)
    
-    reporting_vec_1 <- c(6:n_pars_per_subtype)
-    reporting_prim_vec_1 <- c(6:11)
-    reporting_sec_vec_1 <- reporting_vec_1[reporting_vec_1 %notin% reporting_prim_vec_1]
+    reporting_prim_vec_1 <- which(grepl('primary_care_rate', names(pars)) & grepl('epid_1', names(pars)))
+    reporting_sec_vec_1 <- which(grepl('secondary_care_rate', names(pars)) & grepl('epid_1', names(pars)))
     
-    imd_reporting_pars <- pars[1:4 + n_subtypes*n_pars_per_subtype] 
+    reporting_prim_pars_1 <- if(primary_fitted){pars[reporting_prim_vec_1]}else{
+      true_values[grepl('primary_care_rate', names(true_values)) & grepl('epid_1', names(true_values))]
+      }
+    reporting_sec_pars_1 <- if(secondary_fitted){pars[reporting_sec_vec_1]}else{
+      true_values[grepl('secondary_care_rate', names(true_values)) & grepl('epid_1', names(true_values))]
+    }
+    reporting_pars_1 <- c(reporting_prim_pars_1, reporting_sec_pars_1)
+    
+    imd_reporting_pars <- if(imd_splines_fitted){
+      pars[grepl('imd_spline', names(pars))]}else{
+        true_values[grepl('imd_spline', names(true_values))]
+      }
     
     if(
       
       ## TRANSMISSIBILITY
-      pars[1] < min_trans || pars[1] > max_trans ||
+      trans_1 < min_trans || trans_1 > max_trans ||
       
       ## SUSCEPTIBILITY
       sum(susceptibility_vec_1 < min_susc) > 0 || sum(susceptibility_vec_1 > max_susc) > 0 ||
       
       ## INITIAL INFECTED
-      pars[5] < min_log_init_inf || pars[5] > max_log_init_inf ||
+      init_1 < min_log_init_inf || init_1 > max_log_init_inf ||
       
       ## REPORTING
-      any(pars[reporting_vec_1] < min_reporting) || any(pars[reporting_vec_1] > max_reporting) ||
+      any(reporting_pars_1 < min_reporting) || any(reporting_pars_1 > max_reporting) ||
       
       ## IMD-SPECIFIC REPORTING
-      any(pars[reporting_vec_1]*exp(max(imd_reporting_pars)) > max_reporting) ||
+      any(reporting_pars_1*exp(max(imd_reporting_pars)) > max_reporting) ||
       
       R0_1 < min_r0 || R0_1 > max_r0 
       
@@ -471,40 +580,56 @@ run_mcmc_inference <- function(
     ## SECOND SUBTYPE
     if(n_subtypes == 2){
       
-      susceptibility_vec_2 <- fcn_assign_ages(
-        pars[2 + n_pars_per_subtype],
-        pars[3 + n_pars_per_subtype],
-        pars[4 + n_pars_per_subtype],
+      susceptibility_vec_2 <- unname(if(susc_fitted){fcn_assign_ages(
+        pars['children_susceptibility_epid_2'],
+        pars['adults_susceptibility_epid_2'],
+        pars['older_adults_susceptibility_epid_2'],
         age_labels
-      )
+      )}else{fcn_assign_ages(
+        true_values['children_susceptibility_epid_2'],
+        true_values['adults_susceptibility_epid_2'],
+        true_values['older_adults_susceptibility_epid_2'],
+        age_labels
+      )})
+      
+      trans_2 <- ifelse(trans_fitted, pars['transmissibility_epid_2'], true_values['transmissibility_epid_2'])
+      
+      init_2 <- ifelse(init_fitted, pars['init_infected_epid_2'], true_values['init_infected_epid_2'])
       
       R0_2 <- R0_func(susceptibility = susceptibility_vec_2,
                       inf_period = epid_periods[2],
-                      beta_in = pars[1 + n_pars_per_subtype],
+                      beta_in = trans_2,
                       cm_in = cm_input,
                       per_capita = T,
                       population_vector = demography_input$population)
       
-      reporting_vec_2 <- c(n_pars_per_subtype + 6:n_pars_per_subtype)
-      reporting_prim_vec_2 <- c(n_pars_per_subtype + 6:11)
-      reporting_sec_vec_2 <- reporting_vec_2[reporting_vec_2 %notin% reporting_prim_vec_2]
+      reporting_prim_vec_2 <- which(grepl('primary_care_rate', names(pars)) & grepl('epid_2', names(pars)))
+      reporting_sec_vec_2 <- which(grepl('secondary_care_rate', names(pars)) & grepl('epid_2', names(pars)))
+      
+      reporting_prim_pars_2 <- if(primary_fitted){pars[reporting_prim_vec_2]}else{
+        true_values[grepl('primary_care_rate', names(true_values)) & grepl('epid_2', names(true_values))]
+      }
+      reporting_sec_pars_2 <- if(secondary_fitted){pars[reporting_sec_vec_2]}else{
+        true_values[grepl('secondary_care_rate', names(true_values)) & grepl('epid_2', names(true_values))]
+      }
+      reporting_pars_2 <- c(reporting_prim_pars_2, reporting_sec_pars_2)
       
       if(
         
         ## TRANSMISSIBILITY
-        pars[1 + n_pars_per_subtype] < min_trans || pars[1 + n_pars_per_subtype] > max_trans ||
+        trans_2 < min_trans || trans_2 > max_trans ||
         
         ## SUSCEPTIBILITY
         sum(susceptibility_vec_2 < min_susc) > 0 || sum(susceptibility_vec_2 > max_susc) > 0 ||
         
         ## INITIAL INFECTED
-        pars[5 + n_pars_per_subtype] < min_log_init_inf || pars[5 + n_pars_per_subtype] > max_log_init_inf ||
+        init_2 < min_log_init_inf || init_2 > max_log_init_inf ||
         
         ## REPORTING
-        any(pars[reporting_vec_2] < min_reporting) || any(pars[reporting_vec_2] > max_reporting) ||
+        any(reporting_pars_2 < min_reporting) || any(reporting_pars_2 > max_reporting) ||
         
         ## IMD-SPECIFIC REPORTING
-        any(pars[reporting_vec_2]*exp(max(imd_reporting_pars)) > max_reporting) ||
+        any(reporting_pars_2*exp(max(imd_reporting_pars)) > max_reporting) ||
         
         R0_2 < min_r0 || R0_2 > max_r0 
         
@@ -517,49 +642,75 @@ run_mcmc_inference <- function(
     
     lprob <- 0
     
-    # Scaled normal prior on R0 (pnorm(min_r0) is the log normalising constant)
-    lprob <- lprob + dnorm(R0_1, mean = r0_mean, sd = r0_sd, log = TRUE) -
-      pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
-    # Uniform prior on transmissibility 
-    lprob <- lprob + dunif(unname(pars[1]), min = min_trans, max = max_trans, log = TRUE)
-    # Beta prior on susceptibility
-    lprob <- lprob + sum(dbeta(unname(pars[2:4]), shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
-    # Uniform prior on initial infected
-    lprob <- lprob + dunif(unname(pars[5]), min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
-    # Beta prior on primary care reporting rates (pars 5:10), centred at 2%
-    lprob <- lprob + sum(dbeta(pars[6:11], 
-                               shape1 = prim_beta['a'], 
-                               shape2 = prim_beta['b'], log = TRUE))
-    # Beta prior on secondary care reporting rates (pars 11:16), centred at 0.5%
-    lprob <- lprob + sum(dbeta(pars[12:17], 
-                               shape1 = sec_beta['a'], 
-                               shape2 = sec_beta['b'], log = TRUE))
+    if(susc_fitted | trans_fitted){
+      # Scaled normal prior on R0 (pnorm(min_r0) is the log normalising constant)
+      lprob <- lprob + dnorm(R0_1, mean = r0_mean, sd = r0_sd, log = TRUE) -
+        pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
+    }
+    if(trans_fitted){
+      # Uniform prior on transmissibility 
+      lprob <- lprob + dunif(trans_1, min = min_trans, max = max_trans, log = TRUE)
+      
+    }
+    if(susc_fitted){
+      # Beta prior on susceptibility
+      lprob <- lprob + sum(dbeta(susceptibility_vec_1, shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
+    }
+    if(init_fitted){
+      # Uniform prior on initial infected
+      lprob <- lprob + dunif(init_1, min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
+    }
+    if(primary_fitted){
+      # Beta prior on primary care reporting rates
+      lprob <- lprob + sum(dbeta(reporting_prim_pars_1, 
+                                 shape1 = prim_beta['a'], 
+                                 shape2 = prim_beta['b'], log = TRUE))
+    }
+    if(secondary_fitted){
+      # Beta prior on secondary care reporting rates
+      lprob <- lprob + sum(dbeta(reporting_sec_pars_1, 
+                                 shape1 = sec_beta['a'], 
+                                 shape2 = sec_beta['b'], log = TRUE))
+    }
     
     if(n_subtypes == 2){
       
       # priors on second set of epi parameters
-      
-      lprob <- lprob + dnorm(R0_2, mean = r0_mean, sd = r0_sd, log = TRUE) -
-        pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
-      
-      lprob <- lprob + dunif(unname(pars[1 + n_pars_per_subtype]), min = min_trans, max = max_trans, log = TRUE)
-      
-      lprob <- lprob + sum(dbeta(unname(pars[2:4 + n_pars_per_subtype]), shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
-      
-      lprob <- lprob + dunif(unname(pars[5 + n_pars_per_subtype]), min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
-      
-      lprob <- lprob + sum(dbeta(pars[6:11 + n_pars_per_subtype], 
-                                 shape1 = prim_beta['a'], 
-                                 shape2 = prim_beta['b'], log = TRUE))
-      
-      lprob <- lprob + sum(dbeta(pars[12:17 + n_pars_per_subtype], 
-                                 shape1 = sec_beta['a'], 
-                                 shape2 = sec_beta['b'], log = TRUE))
+      if(susc_fitted | trans_fitted){
+        # Scaled normal prior on R0
+        lprob <- lprob + dnorm(R0_2, mean = r0_mean, sd = r0_sd, log = TRUE) -
+          pnorm(min_r0, mean = r0_mean, sd = r0_sd, lower.tail = FALSE, log.p = TRUE)
+      }
+      if(trans_fitted){
+        # Uniform prior on transmissibility 
+        lprob <- lprob + dunif(trans_2, min = min_trans, max = max_trans, log = TRUE)
+        
+      }
+      if(susc_fitted){
+        # Beta prior on susceptibility
+        lprob <- lprob + sum(dbeta(susceptibility_vec_2, shape1 = shape1_susc, shape2 = shape2_susc, log = TRUE))
+      }
+      if(init_fitted){
+        # Uniform prior on initial infected
+        lprob <- lprob + dunif(init_2, min = min_log_init_inf, max = max_log_init_inf, log = TRUE)
+      }
+      if(primary_fitted){
+        # Beta prior on primary care reporting rates
+        lprob <- lprob + sum(dbeta(reporting_prim_pars_2, 
+                                   shape1 = prim_beta['a'], 
+                                   shape2 = prim_beta['b'], log = TRUE))
+      }
+      if(secondary_fitted){
+        # Beta prior on secondary care reporting rates
+        lprob <- lprob + sum(dbeta(reporting_sec_pars_2, 
+                                   shape1 = sec_beta['a'], 
+                                   shape2 = sec_beta['b'], log = TRUE))
+      }
       
     }
     
     # Normal prior on spline parameters
-    lprob <- lprob + sum(dnorm(unname(pars[1:4 + n_subtypes*n_pars_per_subtype]), mean = imd_mean, sd = imd_sd, log = TRUE))
+    lprob <- lprob + sum(dnorm(imd_reporting_pars, mean = imd_mean, sd = imd_sd, log = TRUE))
     
     return(lprob)
   }
@@ -573,8 +724,17 @@ run_mcmc_inference <- function(
   # set up priors and lower/upper bounds
   {
   # IGPR and IHR centred roughly around the crude estimates (based on attack rate etc.)
-  prim_beta  <- beta_pars(initial_parameters[6], 200)
-  sec_beta   <- beta_pars(initial_parameters[12], 200)
+  prim_beta  <- if(primary_fitted){
+    beta_pars(initial_parameters[which(grepl('primary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], 200)
+    }else{
+      beta_pars(true_values[which(grepl('primary_care',names(true_values)))[1]], 200)
+  }
+  sec_beta   <- if(secondary_fitted){
+    beta_pars(initial_parameters[which(grepl('secondary_care',names(parameters_to_fit)[parameters_to_fit]))[1]], 200)
+  }else{
+    beta_pars(true_values[which(grepl('secondary_care',names(true_values)))[1]], 200)
+  }
+  
   # Susceptibility beta distributed, mean at 0.5
   shape1_susc <- 2
   shape2_susc <- 2
@@ -595,18 +755,24 @@ run_mcmc_inference <- function(
   # 5x higher/lower than each other in IMD 1 vs 3 or IMD 5 vs 3,
   # which would lead to huge ratios between IMD 1 and IMD 5 at the extremes
   
+  n_report_per_subtype <- N_IGPR_VARS + N_IHR_VARS
+  
   ## set up sampler
   lower_vals <- c(
     rep(c(min_trans, rep(min_susc, 3), min_log_init_inf,
-          rep(min_reporting, 12)), n_subtypes),
+          rep(min_reporting, n_report_per_subtype)), n_subtypes),
     rep(min_spline, 4)
                   )
   upper_vals <- c(
     rep(c(max_trans, rep(max_susc, 3), max_log_init_inf,
-          rep(max_reporting, 12)), n_subtypes),
+          rep(max_reporting, n_report_per_subtype)), n_subtypes),
     rep(max_spline, 4)
     )
   }
+  
+  # keep only the parameters being fitted
+  lower_vals <- lower_vals[parameters_to_fit]
+  upper_vals <- upper_vals[parameters_to_fit]
   
   sampler <- function(n = 1){
     ncol_out <- if(is.null(ncol(initial_parameters))){
@@ -630,8 +796,11 @@ run_mcmc_inference <- function(
           }
         }
         
-        susc_1 <- rbeta(3, shape1_susc, shape2_susc)
+        if(susc_fitted){
+          susc_1 <- rbeta(3, shape1_susc, shape2_susc)  
+        }else{susc_1 <- true_values[grepl('susceptibility_epid_1', names(true_values))]}
         
+        if(trans_fitted){
         trans_1 <- R0_func(
           susceptibility    = fcn_assign_ages(susc_1[1],
                                               susc_1[2],
@@ -645,11 +814,15 @@ run_mcmc_inference <- function(
           R0assumed         = R0_1,
           return_beta       = TRUE
         )
+        }else{trans_1 <- true_values['transmissibility_epid_1']}
         
         if(n_subtypes == 2){
           
-          susc_2 <- rbeta(3, shape1_susc, shape2_susc)
+          if(susc_fitted){
+            susc_2 <- rbeta(3, shape1_susc, shape2_susc)
+          }else{susc_2 <- true_values[grepl('susceptibility_epid_2', names(true_values))]}
           
+          if(trans_fitted){
           trans_2 <- R0_func(
             susceptibility    = fcn_assign_ages(susc_2[1],
                                                 susc_2[2],
@@ -663,6 +836,7 @@ run_mcmc_inference <- function(
             R0assumed         = R0_2,
             return_beta       = TRUE
           )
+          }else{trans_2 <- true_values['transmissibility_epid_2']}
         }
         
         if(n_subtypes == 2){
@@ -685,37 +859,62 @@ run_mcmc_inference <- function(
         if(trans_2 < min_trans | trans_2 > max_trans) next
       }
       
+      init_1 <- if(init_fitted){
+        runif(1, min_log_init_inf, max_log_init_inf)
+      }else{true_values['init_infected_epid_1']}
+      
       ## IMD splines normal around 0, SD = 0.5
-      imd_spline_samples <- rnorm(4, mean = imd_mean, sd = imd_sd) 
+      if(imd_splines_fitted){
+        imd_spline_samples <- rnorm(4, mean = imd_mean, sd = imd_sd)  
+      }else{imd_spline_samples <- true_values[grepl('imd_spline', names(true_values))]}
       
       # Check IMD splines are within bounds
       if(sum(imd_spline_samples < min_spline) + 
          sum(imd_spline_samples > max_spline) > 0) next
       
       # Draw reporting rates from Beta priors
-      prim_rates_1 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
-      sec_rates_1  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+      if(primary_fitted){
+        prim_rates_1 <- rbeta(N_IGPR_VARS, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
+      }else{prim_rates_1 <- true_values[grepl('primary_care', names(true_values)) &
+                                          grepl('epid_1', names(true_values))]}
+      if(secondary_fitted){
+        sec_rates_1  <- rbeta(N_IHR_VARS, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+      }else{sec_rates_1 <- true_values[grepl('secondary_care', names(true_values)) &
+                                         grepl('epid_1', names(true_values))]}
       
       # check imd-specific reporting rates 
       if(any(c(prim_rates_1, sec_rates_1)*exp(max(imd_spline_samples)) > max_reporting)) next
       
       if(n_subtypes == 2){
-        prim_rates_2 <- rbeta(6, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
-        sec_rates_2  <- rbeta(6, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+        
+        init_2 <- if(init_fitted){
+          runif(1, min_log_init_inf, max_log_init_inf)
+        }else{true_values['init_infected_epid_2']}
+        
+        # Draw reporting rates from Beta priors
+        if(primary_fitted){
+          prim_rates_2 <- rbeta(N_IGPR_VARS, shape1 = prim_beta['a'], shape2 = prim_beta['b'])
+        }else{prim_rates_2 <- true_values[grepl('primary_care', names(true_values)) &
+                                            grepl('epid_2', names(true_values))]}
+        if(secondary_fitted){
+          sec_rates_2 <- rbeta(N_IHR_VARS, shape1 = sec_beta['a'],  shape2 = sec_beta['b'])
+        }else{sec_rates_2 <- true_values[grepl('secondary_care', names(true_values)) &
+                                           grepl('epid_2', names(true_values))]}
         
         # check imd-specific reporting rates 
         if(any(c(prim_rates_2, sec_rates_2)*exp(max(imd_spline_samples)) > max_reporting)) next
+        
       }
       
-      out[j, ] <- if(n_subtypes == 2){
+      out_vec <- if(n_subtypes == 2){
         
         c(
         trans_1, susc_1,
-        runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
+        init_1,  # log init infected, uniform
         prim_rates_1,                                     # primary care rates
         sec_rates_1,                                      # secondary care rates
         trans_2, susc_2,
-        runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
+        init_2,  # log init infected, uniform
         prim_rates_2,                                     # primary care rates
         sec_rates_2,                                      # secondary care rates
         imd_spline_samples       # IMD spline, normal around 0
@@ -724,13 +923,18 @@ run_mcmc_inference <- function(
           
           c(
             trans_1, susc_1,
-            runif(1, min_log_init_inf, max_log_init_inf),  # log init infected, uniform
+            init_1,  # log init infected, uniform
             prim_rates_1,                                     # primary care rates
             sec_rates_1,                                  # secondary care rates
             imd_spline_samples       # IMD spline, normal around 0
           )
           
-      }
+        }
+      
+      out_vec <- out_vec[parameters_to_fit] # only keep the parameters being fitted anyway
+      
+      out[j, ] <- out_vec
+      
       break
       }
     }
@@ -755,7 +959,7 @@ run_mcmc_inference <- function(
     thin = 1,
     message = F,
     nrChains = n_chains,
-    startValue = initial_parameters #prior$sampler(n_pop_internal)
+    startValue = prior$sampler(n_pop_internal) #initial_parameters
   )
   
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
