@@ -21,6 +21,7 @@ options(dplyr.summarise.inform = FALSE)
     file.path("data", "dummy_data", "dummy_surveillance.rds"),
     file.path("data", "dummy_data", "known_parameters.rds"),
     file.path("data", "dummy_data", "unknown_parameters.rds"),
+    file.path("data", "dummy_data", "mcmc_true_values.rds"),
     file.path("output", "data", "mcmc_samples.rds"),
     file.path("output", "data", "mcmc_posteriors.rds")
   ) #else commandArgs(trailingOnly = TRUE)
@@ -31,10 +32,6 @@ source(file.path('scripts','seir_model.R'))
 source(file.path('scripts','dummy_mcmc','mcmc_functions.R'))
 
 set.seed(60)
-
-figure_filename <- function(string){
-  paste0('figures/dummy_mcmc/parameters/',string,'.png')
-}
 
 #### LOAD DATA ####
 
@@ -176,6 +173,9 @@ read_and_get_samples <- function(i,
   # files with correct burn-in, thinning etc.
   date_files <- date_files[grepl(number_str_in, date_files)]
   
+  # filter to those containing saving_vector (1/0 for fitted parameters)
+  date_files <- date_files[grepl(saving_vector_str, date_files)]
+  
   # files with correct index
   date_files <- date_files[grepl(paste0('INDEX',i), date_files)]
   
@@ -221,7 +221,11 @@ read_and_get_samples <- function(i,
 }
 
 # load most recently run settings (burn in, thinning, samples)
-output_details_file <- readRDS(.args[9])
+
+# manually set for now since flagging introduced
+in_string <- '0_100_1500_111111'
+
+output_details_file <- readRDS(gsub('.rds', paste0('_', in_string,'.rds'), .args[9]))
 number_str <- output_details_file$x[1]
 run_date <- output_details_file$date
 save_all_flag <- output_details_file$save_all
@@ -230,10 +234,17 @@ if(merge_flag){
   merging_run <- output_details_file$previous_pars
 }
 
+saving_vector_str <- '111111'#paste(output_details_file$saving_vector,collapse='')
+
 message('\n------------\nDate run: ',as.character(run_date),'\n------------',sep='')
 message('\n------------\nSettings: ',number_str,'\n------------\n',sep='')
 message('\n------------\nSaved: ',ifelse(save_all_flag,'all','minimal'),'\n------------\n',sep='')
+message('\n------------\nFitted parameters: ',saving_vector_str,'\n------------\n',sep='')
 if(merge_flag){message('\n------------\nMerge with previous run (', merging_run,')\n------------\n',sep='')}
+
+figure_filename <- function(string){
+  paste0('figures/dummy_mcmc/parameters/',string,'_',saving_vector_str,'.png')
+}
 
 # was it run on the HPC? The files saved differently
 WAS_HPC <- output_details_file$HPC
@@ -294,25 +305,52 @@ message('\n', length(total_fitted_pars),' fitted parameters, ',
 epids_actual <- n_distinct(mcmc_samples$epidemic)
 if(3 %in% unique(mcmc_samples$epidemic)){epids_actual <- epids_actual - 17/38}
 total_actual_fitted_pars <- (ncol(mcmc_samples) - 8)*epids_actual
-message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '')
+message('\n', total_actual_fitted_pars,' posteriors in the mcmc_samples file.\n', sep = '') # TODO Fix this when not all pars fitted
 
 message('\n', n_distinct(mcmc_samples$epidemic),' seasons in the mcmc_samples file.\n', sep = '')
 message('\n', mcmc_samples %>% group_by(epidemic) %>% 
                      summarise(chains = n_distinct(chain)) %>% select(chains),' chains per season.\n', sep = '')
 
-fitted_pars <- unique(epid_pars$name)
+## pars fitted
+
+pf <- data.frame(joining_name = names(output_details_file$pars_to_fit),
+                 fitted = unname(unlist(c(output_details_file$pars_to_fit))))
+
+epid_pars <- epid_pars %>% left_join(pf, by = 'joining_name') %>% 
+  mutate(fitted = case_when(is.na(fitted) ~ F, T ~ fitted))
+
+true_unfitted_pars <- epid_pars %>% filter(!fitted, name != 'Reff') %>% 
+  select(epidemic, season, year, subtype, epidemic_of_season, joining_name, value) %>%
+  pivot_wider(names_from = joining_name, values_from = value) 
+
+if(! (1 %in% unique(mcmc_samples$epidemic) | 
+   2 %in% unique(mcmc_samples$epidemic))){
+  true_unfitted_pars <- true_unfitted_pars %>% select(!contains('_epid_2'))
+}
+
+##
+
+fitted_pars <- unique((epid_pars %>% filter(fitted))$name)
 fitted_pars <- fitted_pars[substr(fitted_pars, 1, 4) != 'Reff']
 fitted_pars_not_imd <- fitted_pars[!grepl('imd_spline', fitted_pars)]
 fitted_pars_imd <- fitted_pars[grepl('imd_spline', fitted_pars)]
-posterior_cols <- c(paste0(fitted_pars_not_imd, '_epid_1'),
-                    paste0(fitted_pars_not_imd, '_epid_2'), 
-                    fitted_pars_imd)
+posterior_cols <- if(1 %in% unique(mcmc_samples$epidemic) | 
+                     2 %in% unique(mcmc_samples$epidemic)){
+  c(paste0(fitted_pars_not_imd, '_epid_1'),
+    paste0(fitted_pars_not_imd, '_epid_2'), 
+    fitted_pars_imd)}else{
+      c(paste0(fitted_pars_not_imd, '_epid_1'),
+        fitted_pars_imd)
+    }
 
 admin_cols <- c('likelihood',
                 'gp_likelihood', 'hospital_likelihood', 'subtype_likelihood',
                 'job', 'chain', 'iteration', 'epidemic')
 colnames(mcmc_samples) <- c(posterior_cols,
                             admin_cols)
+
+## ADD UNFITTED (FIXED) PARS
+mcmc_samples <- mcmc_samples %>% left_join(true_unfitted_pars, by = c('epidemic'))
 
 #### FILTER #### 
 burn_in <- as.numeric(strsplit(number_str, split = '_')[[1]][1])
@@ -371,25 +409,29 @@ for(i in 1:nrow(unique_df)){
           beta_in = row$transmissibility_epid_1,
           cm_in = cm))
   
-  R2 <- R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
-                                                 row$adults_susceptibility_epid_2,
-                                                 row$older_adults_susceptibility_epid_2,
-                                                 age_labels),
-                inf_period = known_pars$epid_periods[2],
-                beta_in = row$transmissibility_epid_2,
-                cm_in = cm)
-  
   mcmc_samples_filtered[transmissibility_epid_1 == row$transmissibility_epid_1 &
-                 children_susceptibility_epid_1 == row$children_susceptibility_epid_1 & 
-                 adults_susceptibility_epid_1 == row$adults_susceptibility_epid_1 &
-                 older_adults_susceptibility_epid_1 == row$older_adults_susceptibility_epid_1,
-               Reff_epid_1 := R1]
+                          children_susceptibility_epid_1 == row$children_susceptibility_epid_1 & 
+                          adults_susceptibility_epid_1 == row$adults_susceptibility_epid_1 &
+                          older_adults_susceptibility_epid_1 == row$older_adults_susceptibility_epid_1,
+                        Reff_epid_1 := R1]
   
-  mcmc_samples_filtered[transmissibility_epid_2 == row$transmissibility_epid_2 &
-                 children_susceptibility_epid_2 == row$children_susceptibility_epid_2 &
-                 adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
-                 older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
-               Reff_epid_2 := R2]
+  if('children_susceptibility_epid_2' %in% colnames(row)){
+    
+    R2 <- R0_func(susceptibility = fcn_assign_ages(row$children_susceptibility_epid_2,
+                                                   row$adults_susceptibility_epid_2,
+                                                   row$older_adults_susceptibility_epid_2,
+                                                   age_labels),
+                  inf_period = known_pars$epid_periods[2],
+                  beta_in = row$transmissibility_epid_2,
+                  cm_in = cm)
+    
+    mcmc_samples_filtered[transmissibility_epid_2 == row$transmissibility_epid_2 &
+                            children_susceptibility_epid_2 == row$children_susceptibility_epid_2 &
+                            adults_susceptibility_epid_2 == row$adults_susceptibility_epid_2 &
+                            older_adults_susceptibility_epid_2 == row$older_adults_susceptibility_epid_2,
+                          Reff_epid_2 := R2]
+    
+  }
 
   # Print progress
   setTxtProgressBar(pb, i)
@@ -420,48 +462,59 @@ map(.x = 1:length(traces_filtered), .f = ~{
          plot = traces_filtered[.x],
          width = 14, height = 7)
 })
-tf <- patchwork::wrap_plots(traces_filtered, nrow = 6) 
+nrow_tf <- ifelse(saving_vector_str=='111111',6,3)
+tf <- patchwork::wrap_plots(traces_filtered, nrow = nrow_tf) 
+width_saver <- 10 + 10*n_distinct(mcmc_samples_filtered_burned$epidemic)
 ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_filtered_traces'),.args[length(.args)]), 
        plot = tf,
-       width = 45, height = 22)
+       width = width_saver, height = 22)
 
 message('Plotting log-likelihood')
+true_log_likelihood <- data.frame()
+for(i in 1:3){
+  true_log_likelihood <- rbind(true_log_likelihood,
+        data.frame(epidemic = i,
+                   true_llikelihood = read_csv(paste0('output/data/true_llikelihood_', i, '.csv'))[1,1]))}
 log_likelihood_plot <- plot_trace('likelihood'); suppressWarnings(log_likelihood_plot)
 ggsave(gsub('data/mcmc_posteriors.rds',figure_filename('fitted_likelihood'),.args[length(.args)]), 
        width = 12, height = 16)
 
-risk_ratios <- mcmc_samples_filtered_burned %>% 
-  select(job, chain, iteration, epidemic, contains('care_rate')) %>% 
-  pivot_longer(!c(job, chain, iteration, epidemic)) %>% 
-  mutate(setting = case_when(grepl('primary', name) ~ 'primary', grepl('secondary', name) ~ 'secondary'),
-         subtype = case_when(grepl('epid_1', name) ~ '1', grepl('epid_2', name) ~ '2'),
-         broad_age = case_when(grepl('children', name) ~ 'children', grepl('older_adults', name) ~ 'older_adults', T ~ 'adults'),
-         risk = case_when(grepl('high', name) ~ 'high', T ~ 'low')) %>% select(!name) %>% 
-  pivot_wider(names_from = risk, values_from = value) %>% 
-  mutate(high_over_low = high/low) %>% mutate(subtype_season = paste0(years[epidemic], ' (subtype ', subtype, ')'))
-
-true_ratios <- epid_pars %>% filter(grepl('care_rate', joining_name)) %>%  
-  mutate(setting = case_when(grepl('primary', joining_name) ~ 'primary', grepl('secondary', joining_name) ~ 'secondary'),
-         subtype = case_when(grepl('epid_1', joining_name) ~ '1', grepl('epid_2', joining_name) ~ '2'),
-         broad_age = case_when(grepl('children', joining_name) ~ 'children', grepl('older_adults', joining_name) ~ 'older_adults', T ~ 'adults'),
-         risk = case_when(grepl('high', joining_name) ~ 'high', T ~ 'low'), 
-         subtype_season = paste0(year, ' (subtype ', subtype, ')')) %>% 
-  select(subtype_season, setting, subtype, broad_age, risk, value) %>% 
-  pivot_wider(names_from = risk, values_from = value) %>% 
-  mutate(true_high_over_low = high/low)
-
-risk_ratios <- risk_ratios %>% 
-  left_join(true_ratios %>% select(!c(low,high)), by = c('subtype_season','setting','subtype','broad_age')) %>% 
-  filter(!subtype_season == '2025 (subtype 2)')
-
-risk_ratios$broad_age <- factor(risk_ratios$broad_age, levels = c('children','adults','older_adults')) 
-
-risk_ratios %>% 
-  ggplot() + 
-  geom_line(aes(iteration, high_over_low, color = as.factor(job), group = interaction(job, chain))) + 
-  geom_hline(aes(yintercept = true_high_over_low), lty = 2) +
-  facet_grid(interaction(broad_age,setting) ~ subtype_season, scales = 'free') + theme_bw() +
-  labs(y = 'IGPR or IHR (high risk / low risk)', col = 'job')
+if(!output_details_file$risk_ratios_fixed){
+  
+  risk_ratios <- mcmc_samples_filtered_burned %>% 
+    select(job, chain, iteration, epidemic, contains('care_rate')) %>% 
+    pivot_longer(!c(job, chain, iteration, epidemic)) %>% 
+    mutate(setting = case_when(grepl('primary', name) ~ 'primary', grepl('secondary', name) ~ 'secondary'),
+           subtype = case_when(grepl('epid_1', name) ~ '1', grepl('epid_2', name) ~ '2'),
+           broad_age = case_when(grepl('children', name) ~ 'children', grepl('older_adults', name) ~ 'older_adults', T ~ 'adults'),
+           risk = case_when(grepl('high', name) ~ 'high', T ~ 'low')) %>% select(!name) %>% 
+    pivot_wider(names_from = risk, values_from = value) %>% 
+    mutate(high_over_low = high/low) %>% mutate(subtype_season = paste0(years[epidemic], ' (subtype ', subtype, ')'))
+  
+  true_ratios <- epid_pars %>% filter(grepl('care_rate', joining_name)) %>%  
+    mutate(setting = case_when(grepl('primary', joining_name) ~ 'primary', grepl('secondary', joining_name) ~ 'secondary'),
+           subtype = case_when(grepl('epid_1', joining_name) ~ '1', grepl('epid_2', joining_name) ~ '2'),
+           broad_age = case_when(grepl('children', joining_name) ~ 'children', grepl('older_adults', joining_name) ~ 'older_adults', T ~ 'adults'),
+           risk = case_when(grepl('high', joining_name) ~ 'high', T ~ 'low'), 
+           subtype_season = paste0(year, ' (subtype ', subtype, ')')) %>% 
+    select(subtype_season, setting, subtype, broad_age, risk, value) %>% 
+    pivot_wider(names_from = risk, values_from = value) %>% 
+    mutate(true_high_over_low = high/low)
+  
+  risk_ratios <- risk_ratios %>% 
+    left_join(true_ratios %>% select(!c(low,high)), by = c('subtype_season','setting','subtype','broad_age')) %>% 
+    filter(!subtype_season == '2025 (subtype 2)')
+  
+  risk_ratios$broad_age <- factor(risk_ratios$broad_age, levels = c('children','adults','older_adults')) 
+  
+  risk_ratios %>% 
+    ggplot() + 
+    geom_line(aes(iteration, high_over_low, color = as.factor(job), group = interaction(job, chain))) + 
+    geom_hline(aes(yintercept = true_high_over_low), lty = 2) +
+    facet_grid(interaction(broad_age,setting) ~ subtype_season, scales = 'free') + theme_bw() +
+    labs(y = 'IGPR or IHR (high risk / low risk)', col = 'job')
+  
+}
 
 #### PLOT DENSITY #### 
 # message('Plotting densities')
@@ -512,7 +565,9 @@ ggsave(filename = gsub('data/mcmc_posteriors.rds',figure_filename('fitted_pairwi
 
 #### SAVE DATA ####
 
-write_rds(mcmc_samples_filtered_burned, .args[length(.args)])
+write_rds(mcmc_samples_filtered_burned, gsub('.rds',
+                                             paste0('_',saving_vector_str,'.rds'),
+                                             .args[length(.args)]))
 
 
 

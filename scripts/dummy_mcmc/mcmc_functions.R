@@ -24,7 +24,8 @@ run_mcmc_inference <- function(
     n_chains,
     n_cores = 1,
     txt_output = NULL,
-    manual_print_mod = NULL
+    manual_print_mod = NULL,
+    return_pars_llikelihood = F # just return the log-likelihood of initial_parameters
 ) {
   
   ## SET UP DATA FRAMES ETC. ##
@@ -978,6 +979,10 @@ run_mcmc_inference <- function(
     startValue = prior$sampler(n_pop_internal) #initial_parameters
   )
   
+  if(return_pars_llikelihood){
+    return(llikelihood(initial_parameters))
+  }
+  
   out <- runMCMC(bayesianSetup = bayesianSetup, sampler = 'DEzs', settings = settings)
   
   samp <- getSample(out, start = nburn + 1, thin = thinning, coda = TRUE)
@@ -1153,7 +1158,7 @@ plot_trace <- function(var, filtered = F){
         filter(!is.na(season)) %>% # remove non-real epidemics
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
         ggplot() +
-        geom_hline(yintercept = 0, lty=2) +
+        # geom_hline(yintercept = 0, lty=2) +
         facet_grid(.~season, scales = 'free') +
         theme_lg() + labs(y = var_label) + 
         theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
@@ -1163,10 +1168,16 @@ plot_trace <- function(var, filtered = F){
         pivot_longer(!c(iteration,epidemic,chain,job)) %>%
         left_join(epid_pars_joining, by = c('epidemic')) %>% 
         filter(!is.na(season)) %>% # remove non-real epidemics
+        left_join(true_log_likelihood, by = 'epidemic') %>% 
         mutate(epidemic = paste0("Season ", epidemic)) %>% 
         filter(iteration > 0.3*max(iteration)) %>% 
         ggplot() +
-        geom_hline(yintercept = 0, lty=2) +
+        geom_hline(aes(yintercept = true_log_likelihood), lty=2) +
+        # geom_label(data = data %>% left_join(true_log_likelihood, by = 'epidemic') %>% 
+        #              select(iteration, true_log_likelihood) %>% filter(iteration == max(iteration)) %>% 
+        #              unique(),
+        #              aes(x = iteration/1000, y = true_log_likelihood),
+        #            label = 'log-likelihood of\ntrue parameters', hjust=1) +
         facet_grid(.~season, scales = 'free') +
         theme_lg() + labs(y = var_label) + 
         theme(legend.position = 'none') + labs(x = 'Iteration (1000s)')
@@ -1241,7 +1252,12 @@ plot_trace <- function(var, filtered = F){
     
     p_filt <- p_filt +
       geom_line(aes(x = iteration/1000, y = value, col = as.factor(job), group = chain),
-                alpha = 0.4)
+                alpha = 0.4) + 
+      geom_label(data = data %>% left_join(true_log_likelihood, by = 'epidemic') %>% 
+                   select(iteration, true_log_likelihood) %>% filter(iteration == max(iteration)) %>% 
+                   unique(),
+                 aes(x = iteration/1000, y = true_log_likelihood),
+                 label = 'log-likelihood of\ntrue parameters', hjust=1)
     
     p + p_filt + suppressWarnings(print(p2)) + plot_layout(nrow = 3)
     

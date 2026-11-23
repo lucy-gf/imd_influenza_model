@@ -38,9 +38,11 @@ PREVIOUS_PARS <- F
 trans_fit <- as.logical(bash_args[3]) # transmissibility
 susc_fit <- as.logical(bash_args[4]) # susceptibility (x3)
 init_fit <- as.logical(bash_args[5]) # initial infected
-primary_fit <- as.logical(bash_args[6]) # IGPRs (x3)
-secondary_fit <- as.logical(bash_args[7]) # IHRs (x3)
+primary_fit <- as.logical(bash_args[6]) # IGPRs (x3/6)
+secondary_fit <- as.logical(bash_args[7]) # IHRs (x3/6)
 imd_spline_fit <- as.logical(bash_args[8]) # IMD splines (x4)
+
+saving_vector <- as.numeric(bash_args[3:8])
 
 message(paste0('Parameters fitted: ',
                ifelse(trans_fit,'transmissibility, ', ''),
@@ -149,7 +151,13 @@ TWO_SUBTYPES <- (n_subtypes == 2)
 
 ## TRUE MCMC VALUES
 mcmc_true_values <- readRDS(.args[5]) %>% 
-  filter(season == season_i, name != 'Reff')
+  filter(season == season_i, name != 'Reff') 
+
+# remove one set of imd splines if in a two epidemic season
+if(TWO_SUBTYPES){
+  mcmc_true_values <- mcmc_true_values %>% filter(!(grepl('imd_spline', name) &
+                                                      epidemic_of_season == 1))
+}
 
 if(RISK_RATIOS_FIXED){
   mcmc_true_values <- mcmc_true_values %>% filter(!grepl('_high', name))
@@ -310,6 +318,35 @@ if(PREVIOUS_PARS){
 
 ###########################################################################################
 
+#### SAVE TRUE LOG_LIKELIHOOD ####
+
+true_log_likelihood <- run_mcmc_inference(
+  demography_input = demography,
+  vaccinated_input = vaccinated_data_seasonal,
+  subtype_season = subtype_seasons %>% filter(season == season_i),
+  cm_input = pc_cm,
+  epidemic_to_fit = surveillance_data %>% filter(index == i),
+  epid_periods = known_pars$epid_periods,
+  coverage_rates = known_pars$proportion_observed,
+  care_delays = delays,
+  initial_parameters = mcmc_true_values$value,
+  save_all = save_all_flag,
+  parameters_to_fit = pars_to_fit,
+  true_values = true_values_in,
+  n_samples = n_samples,
+  nburn = burn_in,
+  thinning = thinning_value,
+  n_chains = 1,
+  txt_output = paste0(i, '_', chain),
+  manual_print_mod = 1000,
+  return_pars_llikelihood = T
+)
+
+write_csv(data.frame(true_log_likelihood),
+          paste0('output/data/true_llikelihood_', i, '.csv'))
+
+###########################################################################################
+
 #### RUN MCMC ####
 
 mcmc_results <- run_mcmc_inference(
@@ -341,6 +378,8 @@ write_rds(list(x=number_string,
                save_all = save_all_flag,
                date = Sys.Date(),
                pars_to_fit = pars_to_fit,
+               saving_vector = saving_vector,
+               risk_ratios_fixed = RISK_RATIOS_FIXED,
                using_previous_pars = PREVIOUS_PARS,
                previous_pars = if(PREVIOUS_PARS){previous_run$x}else{NULL},
                previous_pars_date = if(PREVIOUS_PARS){previous_run$date}else{NULL},
@@ -353,16 +392,18 @@ write_rds(list(x=number_string,
                save_all = save_all_flag,
                date = Sys.Date(),
                pars_to_fit = pars_to_fit,
+               saving_vector = saving_vector,
+               risk_ratios_fixed = RISK_RATIOS_FIXED,
                using_previous_pars = PREVIOUS_PARS,
                previous_pars = if(PREVIOUS_PARS){previous_run$x}else{NULL},
                previous_pars_date = if(PREVIOUS_PARS){previous_run$date}else{NULL},
                previous_pars_save_all = if(PREVIOUS_PARS){previous_run$save_all}else{NULL}), 
-          gsub('.rds',paste0('_', number_string,'_',paste(pars_to_fit, collapse = '_'),'.rds'),
+          gsub('.rds',paste0('_', number_string,'_', paste(saving_vector,collapse=''),'.rds'),
                .args[6]))
 
 # save actual data
 write_rds(mcmc_results, gsub('.rds',paste0('_INDEX', i, '_CHAIN', chain, '_', 
-                                           number_string,'_',Sys.Date(),'.rds'),
+                                           number_string,'_',Sys.Date(), '_', paste(saving_vector,collapse=''),'.rds'),
                              gsub('data/',paste0('data/',number_string,'/'),.args[6])))
 
 
