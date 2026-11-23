@@ -52,6 +52,10 @@ simulated_subtype_seasons <- data.table()
 
 #### SAMPLE SURVEILLANCE DATA ####
 
+# could either sample binom or poisson
+# (fitting uses poisson so choosing that)
+sampling_distribution <- c('BINOM','POISSON')[2]
+
 full_df <- data.frame()
 
 for(k in 1:length(infections)){
@@ -107,8 +111,15 @@ for(k in 1:length(infections)){
     }else{
       prob_i <- (infections_df$hosp_rate[i])
       if(prob_i <= 0){prob_i <- 1e-10}
-      sec_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
-                      prob = prob_i)
+      sec_i <- if(sampling_distribution == "BINOM"){
+        rbinom(size = infections_df$observed_infections[i], n = 1,
+               prob = prob_i)
+      }else{
+        if(sampling_distribution == "POISSON"){
+          rpois(n = 1, lambda = infections_df$observed_infections[i]*prob_i)
+        }
+      }
+       
       secondary_care <- c(secondary_care, sec_i)
     }
   }
@@ -132,6 +143,14 @@ for(k in 1:length(infections)){
     }else{
       prob_i <- (infections_df$gp_rate[i])
       if(prob_i <= 0){prob_i <- 1e-10}
+      prc_i <- if(sampling_distribution == "BINOM"){
+        rbinom(size = infections_df$observed_infections[i], n = 1,
+               prob = prob_i)
+      }else{
+        if(sampling_distribution == "POISSON"){
+          rpois(n = 1, lambda = infections_df$observed_infections[i]*prob_i)
+        }
+      }
       prc_i <- rbinom(size = infections_df$observed_infections[i], n = 1,
                       prob = prob_i)
       primary_care <- c(primary_care, prc_i)
