@@ -11,6 +11,6 @@
 pwd; hostname; date
 echo "time started"
 cd imd_influenza_model
-Rscript scripts/dummy_mcmc/mcmc_fitting_HPC.R 3 ${SLURM_ARRAY_TASK_ID} 1 1 1 0 0 0
+Rscript scripts/dummy_mcmc/mcmc_fitting_HPC.R 3 ${SLURM_ARRAY_TASK_ID} 1 1 0 1 0 0
 date
 echo "time ended"

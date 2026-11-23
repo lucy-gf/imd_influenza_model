@@ -17,7 +17,7 @@ options(dplyr.summarise.inform = FALSE)
            file.path("data", "dummy_data", "mcmc_true_values.rds"),
            file.path("output", "data", "mcmc_samples.rds"))
 
-bash_args <- if (interactive()) c(3, 1, 1, 1, 1, 1, 1, 1) else as.numeric(commandArgs(trailingOnly = TRUE))
+bash_args <- if (interactive()) c(3, 1, 1, 1, 0, 1, 0, 0) else as.numeric(commandArgs(trailingOnly = TRUE))
 
 #### RUN OPTIONS ####
 
@@ -276,7 +276,7 @@ if(ncol(initial_parameters_in) != sum(pars_to_fit)){stop('initial_parameters_in 
 ## MCMC pars
 burn_in <- 0
 thinning_value <- 100
-n_samples <- 1500
+n_samples <- 1000
 
 number_string <- paste0(burn_in,'_',thinning_value,'_',n_samples)
 

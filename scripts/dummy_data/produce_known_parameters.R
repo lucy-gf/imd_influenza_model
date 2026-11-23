@@ -68,7 +68,7 @@ if(USING_TRUE_RISK_DAT){
   }
   
   ## add some variation by IMD
-  rgiv_vec <- c(0.15, 0.25, 0.08) # children, adults, older adults
+  rgiv_vec <- c(0.15, 0.2, 0.2) # children, adults, older adults
   risk_group_imd_variation_multipliers <- c(
     rep(seq(1 + 2*rgiv_vec[1], 1 - 2*rgiv_vec[1], by = -rgiv_vec[1]), 3),
     rep(seq(1 + 2*rgiv_vec[2], 1 - 2*rgiv_vec[2], by = -rgiv_vec[2]), 4),
