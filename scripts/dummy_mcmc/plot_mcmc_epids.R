@@ -430,8 +430,8 @@ if(F){
     pivot_wider(names_from = risk_level, values_from = attack_rate) %>% 
     mutate(imd_quintile = paste0('IMD ', imd_quintile)) %>% 
     ggplot() + 
-    geom_line(aes(date, high/low, group = chain_it_id), alpha = 0.1) + 
     geom_hline(yintercept = 1, lty = 2, col = 2) + 
+    geom_line(aes(date, high/low, group = chain_it_id), alpha = 0.1) +
     facet_grid(age_grp ~ imd_quintile, scales = 'free') + 
     ylim(c(0.99, 1.01)) + ylab('Attack rate (high risk / low risk)') + 
     theme_bw() 

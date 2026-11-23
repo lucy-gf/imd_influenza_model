@@ -144,6 +144,10 @@ vaccination_coverage_age_vector <- fcn_assign_ages(
   age_labels
 )
 
+risk_vacc_only <- fcn_assign_ages(
+  F, T, F, age_labels
+)
+
 ## add some variation by IMD
 vaccination_imd_variation <- seq(0.9, 1.1, by = 0.05)
 
@@ -163,7 +167,7 @@ vaccinated_pop <- rbind(vaccinated_pop_1 %>% mutate(risk_level = 'low', pop = po
   slice(rep(row_number(), 3)) %>% 
   mutate(start_of_season = rep(years, each = nrow[1])) %>% select(!nrow) %>% 
   mutate(vaccinated_population = case_when(
-    age_grp %in% c('18-25', '26-34', '35-49', '50-69') & risk_level == 'low' ~ 0,
+    age_grp %in% age_labels[risk_vacc_only] & risk_level == 'low' ~ 0,
     T ~ round(vaccinated_proportion*pop)
   )) %>% 
   ## ENSURE ALL POP ORDERS ARE IMD THEN AGE
